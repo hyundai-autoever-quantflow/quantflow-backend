@@ -3,3 +3,16 @@ spring:
     name: quantflow-backend
 
 
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v3/api-docs
+
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+    operation-sorter: method
+    tags-sorter: alpha
+    persist-authorization: false
+
+  paths-to-match: /api/v1/**
