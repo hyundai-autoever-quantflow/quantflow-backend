@@ -54,10 +54,6 @@ public class BrokerConnection extends BaseCreatedTimeEntity {
     private String accountNumberMasked;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, updatable = false, length = 20)
-    private BrokerEnvironment environment;
-
-    @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
     private BrokerConnectionStatus status = BrokerConnectionStatus.VERIFYING;
 
@@ -104,7 +100,6 @@ public class BrokerConnection extends BaseCreatedTimeEntity {
             BrokerType broker,
             String accountFingerprint,
             String accountNumberMasked,
-            BrokerEnvironment environment,
             String credentialRef,
             String requestKey,
             String requestHash
@@ -113,7 +108,6 @@ public class BrokerConnection extends BaseCreatedTimeEntity {
         this.broker = Objects.requireNonNull(broker, "증권사는 필수입니다.");
         this.accountFingerprint = Objects.requireNonNull(accountFingerprint, "계좌 식별값은 필수입니다.");
         this.accountNumberMasked = Objects.requireNonNull(accountNumberMasked, "마스킹 계좌번호는 필수입니다.");
-        this.environment = Objects.requireNonNull(environment, "투자 환경은 필수입니다.");
         this.credentialRef = credentialRef;
         this.requestKey = Objects.requireNonNull(requestKey, "요청 키는 필수입니다.");
         this.requestHash = Objects.requireNonNull(requestHash, "요청 해시는 필수입니다.");
@@ -124,7 +118,6 @@ public class BrokerConnection extends BaseCreatedTimeEntity {
             BrokerType broker,
             String accountFingerprint,
             String accountNumberMasked,
-            BrokerEnvironment environment,
             String credentialRef,
             String requestKey,
             String requestHash
@@ -134,7 +127,6 @@ public class BrokerConnection extends BaseCreatedTimeEntity {
                 .broker(broker)
                 .accountFingerprint(accountFingerprint)
                 .accountNumberMasked(accountNumberMasked)
-                .environment(environment)
                 .credentialRef(credentialRef)
                 .requestKey(requestKey)
                 .requestHash(requestHash)
