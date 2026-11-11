@@ -15,7 +15,13 @@ import java.util.Objects;
 
 @Getter
 @Entity
-@Table(name = "users")
+@Table(
+        name = "users",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_users_social_provider_id",
+                columnNames = {"social_provider", "provider_id"}
+        )
+)
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class User extends BaseTimeEntity {
     @Id
@@ -23,16 +29,16 @@ public class User extends BaseTimeEntity {
     private Long memberId;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "social_provider")
+    @Column(name = "social_provider", nullable = false, updatable = false, length = 20)
     private SocialProvider socialProvider;
 
-    @Column(name = "provider_id")
+    @Column(name = "provider_id", nullable = false, updatable = false)
     private String providerId;
 
-    @Column(nullable = false, unique = true, length = 255)
+    @Column(length = 255)
     private String email;
 
-    @Column(unique = true, length = 50)
+    @Column(length = 50)
     private String name;
 
     @JdbcTypeCode(SqlTypes.JSON)
