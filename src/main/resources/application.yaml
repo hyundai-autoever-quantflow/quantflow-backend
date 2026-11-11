@@ -1,3 +1,15 @@
+app:
+  oauth2:
+    google:
+      client-id: ${GOOGLE_WEB_CLIENT_ID}
+
+  jwt:
+    secret-base64: ${JWT_SECRET_BASE64}
+    issuer: quantflow
+    audience: quantflow-api
+    access-token-ttl-seconds: 900
+    refresh-token-ttl-seconds: 1209600
+
 spring:
   application:
     name: quantflow-backend
@@ -20,18 +32,14 @@ spring:
     validate-on-migrate: true
     baseline-on-migrate: false
 
-  security:
-    oauth2:
-      client:
-        registration:
-          google:
-            client-id: ${GOOGLE_CLIENT_ID}
-            client-secret: ${GOOGLE_CLIENT_SECRET}
-            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
-            scope:
-              - openid
-              - email
-              - profile
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      connect-timeout: 3s
+      timeout: 3s
+
 
 springdoc:
   api-docs:
