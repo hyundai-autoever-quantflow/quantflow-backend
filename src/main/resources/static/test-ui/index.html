@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer-when-downgrade">
+  <title>QUANTFLOW 가입·계좌 연결 테스트</title>
+  <style>
+    body { font-family: sans-serif; max-width: 700px; margin: 24px auto; padding: 0 12px; }
+    section { margin: 24px 0; }
+    label { display: block; margin: 12px 0; }
+    input, select { box-sizing: border-box; width: 100%; padding: 6px; }
+    button { margin: 4px 4px 4px 0; padding: 6px 10px; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+    #status[data-error="true"] { color: #b00020; }
+  </style>
+  <script src="/test-ui/app.js" defer></script>
+</head>
+<body>
+  <h1>가입·계좌 연결 테스트</h1>
+  <p>구글 로그인 → 토스 계좌 조회 → 계좌 선택 → 연결</p>
+  <p id="status" role="status" aria-live="polite">구글 로그인 준비 중…</p>
+
+  <section aria-labelledby="login-title">
+    <h2 id="login-title">1. 구글 회원가입 / 로그인</h2>
+    <p>처음 로그인하면 자동으로 가입돼요.</p>
+    <div id="google-button"></div>
+    <button id="logout" type="button" disabled>로그아웃</button>
+    <pre id="member">로그인 전</pre>
+  </section>
+
+  <section aria-labelledby="verify-title">
+    <h2 id="verify-title">2. 토스 계좌 조회</h2>
+    <form id="verify-form" autocomplete="off">
+      <fieldset id="credentials" disabled>
+        <legend>본인의 토스 Open API 인증정보</legend>
+        <label for="client-id">Client ID
+          <input id="client-id" name="clientId" required maxlength="255" autocomplete="off" spellcheck="false">
+        </label>
+        <label for="client-secret">Client Secret
+          <input id="client-secret" name="clientSecret" type="password" required maxlength="1024" autocomplete="off">
+        </label>
+        <button type="submit">계좌 조회</button>
+      </fieldset>
+    </form>
+  </section>
+
+  <section aria-labelledby="connect-title">
+    <h2 id="connect-title">3. 계좌 연결</h2>
+    <label for="accounts">연결할 계좌</label>
+    <select id="accounts" disabled><option value="">먼저 계좌를 조회하세요</option></select>
+    <p id="ticket-status"></p>
+    <button id="connect" type="button" disabled>선택한 계좌 연결</button>
+    <pre id="connection-result"></pre>
+  </section>
+
+  <section aria-labelledby="list-title">
+    <h2 id="list-title">내 연결 계좌</h2>
+    <button id="reload-connections" type="button" disabled>목록 새로고침</button>
+    <pre id="connections">로그인 후 확인할 수 있어요.</pre>
+  </section>
+  <p>새로고침하면 로그인이 초기화돼요. 계좌 연결만 진행하며 자동매수는 실행하지 않아요.</p>
+  <p><a href="/swagger-ui.html">Swagger 열기</a></p>
+</body>
+</html>

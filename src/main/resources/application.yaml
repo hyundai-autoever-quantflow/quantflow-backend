@@ -1,4 +1,29 @@
+app:
+  test-ui:
+    enabled: ${TEST_UI_ENABLED:false}
+
+  oauth2:
+    google:
+      client-id: ${GOOGLE_WEB_CLIENT_ID}
+
+  jwt:
+    secret-base64: ${JWT_SECRET_BASE64}
+    issuer: quantflow
+    audience: quantflow-api
+    access-token-ttl-seconds: 900
+    refresh-token-ttl-seconds: 1209600
+
+  broker:
+    encryption-key-base64: ${BROKER_ENCRYPTION_KEY_BASE64:}
+    toss:
+      base-url: https://openapi.tossinvest.com
+      connect-timeout: 3s
+      read-timeout: 5s
+
 spring:
+  config:
+    import: "optional:file:./.env[.properties]"
+
   application:
     name: quantflow-backend
 
@@ -19,6 +44,15 @@ spring:
     locations: classpath:db/migration
     validate-on-migrate: true
     baseline-on-migrate: false
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      connect-timeout: 3s
+      timeout: 3s
+
 
 springdoc:
   api-docs:
