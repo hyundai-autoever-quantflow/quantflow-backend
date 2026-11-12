@@ -6,7 +6,11 @@ Android의 Google SDK/Credential Manager에서 받은 ID 토큰을 백엔드 API
 
 ## 실행 설정
 
-IntelliJ 실행 구성 또는 프로세스 환경변수에 설정합니다. `.env` 파일만 만드는 것으로 Spring Boot가 자동으로 읽지는 않습니다.
+프로젝트 루트의 `.env` 또는 IntelliJ 실행 구성·프로세스 환경변수에 설정합니다.
+`application.yaml`의 `spring.config.import`가 작업 디렉터리의 `.env`를 properties 형식으로 읽습니다.
+IntelliJ의 Working directory는 프로젝트 루트로 설정하세요.
+`.env`는 `KEY=value` 형식으로 작성하며 값에 따옴표를 붙이거나 `export`를 사용하지 않습니다.
+같은 키의 프로세스 환경변수는 `.env`보다 우선합니다.
 
 - `GOOGLE_WEB_CLIENT_ID`: Android의 serverClientId와 같은 웹 유형 Google 클라이언트 ID
 - `JWT_SECRET_BASE64`: 최소 32바이트 난수를 Base64로 인코딩한 JWT 서명키

@@ -11,6 +11,9 @@ app:
     refresh-token-ttl-seconds: 1209600
 
 spring:
+  config:
+    import: "optional:file:./.env[.properties]"
+
   application:
     name: quantflow-backend
 
