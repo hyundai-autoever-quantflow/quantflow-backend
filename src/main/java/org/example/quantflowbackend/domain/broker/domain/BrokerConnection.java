@@ -29,7 +29,8 @@ import java.util.Objects;
                 @UniqueConstraint(
                         name = "uk_broker_connections_user_request",
                         columnNames = {"user_id", "request_key"}
-                )
+                ),
+                @UniqueConstraint(name = "uk_broker_connections_ticket", columnNames = "verification_ticket_hash")
         }
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -87,6 +88,9 @@ public class BrokerConnection extends BaseCreatedTimeEntity {
     @Column(name = "request_receipts", nullable = false, columnDefinition = "jsonb")
     private List<Map<String, Object>> requestReceipts = new ArrayList<>();
 
+    @Column(name = "verification_ticket_hash", length = 64, updatable = false)
+    private String verificationTicketHash;
+
     @Version
     @Column(name = "resource_version", nullable = false)
     private Long resourceVersion;
@@ -111,6 +115,17 @@ public class BrokerConnection extends BaseCreatedTimeEntity {
         this.credentialRef = credentialRef;
         this.requestKey = Objects.requireNonNull(requestKey, "요청 키는 필수입니다.");
         this.requestHash = Objects.requireNonNull(requestHash, "요청 해시는 필수입니다.");
+    }
+
+    public void completeTossVerification(String ticketHash, LocalDateTime verifiedAt) {
+        if (broker != BrokerType.TOSS || status != BrokerConnectionStatus.VERIFYING || credentialRef == null) {
+            throw new IllegalStateException("검증 대기 중인 토스 계좌만 연결할 수 있습니다.");
+        }
+        this.verificationTicketHash = Objects.requireNonNull(ticketHash);
+        this.lastVerifiedAt = Objects.requireNonNull(verifiedAt);
+        this.status = BrokerConnectionStatus.CONNECTED;
+        this.permissions = new HashMap<>(Map.of("accountRead", true));
+        this.lastErrorCode = null;
     }
 
     public static BrokerConnection create(
