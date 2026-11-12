@@ -1,6 +1,7 @@
 package org.example.quantflowbackend.global.config;
 
 import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
@@ -30,7 +31,8 @@ public class SecurityConfig {
 
     @Bean
     @Order(2)
-    public SecurityFilterChain apiSecurityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain apiSecurityFilterChain(HttpSecurity http,
+            @Value("${app.test-ui.enabled:false}") boolean testUiEnabled) throws Exception {
         return http
                 .csrf(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
@@ -38,10 +40,21 @@ public class SecurityConfig {
                 .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .requestCache(cache -> cache.requestCache(new NullRequestCache()))
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/oauth2", "/api/v1/auth/reissue", "/api/v1/auth/logout").permitAll()
+                .headers(headers -> headers.addHeaderWriter((request, response) -> {
+                    if (testUiEnabled && request.getServletPath().startsWith("/test-ui/")) {
+                        response.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+                    }
+                }))
+                .authorizeHttpRequests(auth -> {
+                    if (testUiEnabled) {
+                        auth.requestMatchers(HttpMethod.GET, "/test-ui/**").permitAll();
+                    } else {
+                        auth.requestMatchers("/test-ui/**").denyAll();
+                    }
+                    auth.requestMatchers(HttpMethod.POST, "/api/v1/auth/oauth2", "/api/v1/auth/reissue", "/api/v1/auth/logout").permitAll()
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs", "/v3/api-docs/**", "/error").permitAll()
-                        .anyRequest().authenticated())
+                        .anyRequest().authenticated();
+                })
                 .oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults()))
                 .build();
     }
