@@ -9,6 +9,7 @@ import org.example.quantflowbackend.global.security.JwtTokenProvider;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -24,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -32,6 +34,9 @@ import static org.junit.jupiter.api.Assertions.*;
 class TossAccountLinkIntegrationTest {
     private static final AtomicInteger tokenRequests = new AtomicInteger();
     private static final AtomicInteger unexpectedRequests = new AtomicInteger();
+    private static final AtomicInteger holdingsRequests = new AtomicInteger();
+    private static final AtomicInteger holdingsStatus = new AtomicInteger(200);
+    private static final AtomicBoolean rejectNextToken = new AtomicBoolean();
     private static HttpServer toss;
     @LocalServerPort int port;
     @Autowired UserRepository users;
@@ -61,6 +66,21 @@ class TossAccountLinkIntegrationTest {
             } else if (path.equals("/api/v1/accounts") && exchange.getRequestMethod().equals("GET")
                     && "Bearer test-toss-token".equals(exchange.getRequestHeaders().getFirst("Authorization"))) {
                 body = "{\"result\":[{\"accountNo\":\"12345678901\",\"accountSeq\":1,\"accountType\":\"BROKERAGE\"}]}";
+            } else if (path.equals("/api/v1/holdings") && exchange.getRequestMethod().equals("GET")
+                    && "Bearer test-toss-token".equals(exchange.getRequestHeaders().getFirst("Authorization"))
+                    && "1".equals(exchange.getRequestHeaders().getFirst("X-Tossinvest-Account"))) {
+                holdingsRequests.incrementAndGet();
+                status = rejectNextToken.getAndSet(false) ? 401 : holdingsStatus.get();
+                if (status == 200) {
+                    String query = exchange.getRequestURI().getQuery();
+                    String fixture = "symbol=EMPTY".equals(query) ? "empty" : "symbol=005930".equals(query) ? "filtered" : "mixed";
+                    body = new ClassPathResource("toss/holdings-" + fixture + ".json").getContentAsString(StandardCharsets.UTF_8);
+                } else if (status == -1) {
+                    status = 200;
+                    body = "{\"result\":null}";
+                } else {
+                    body = "{\"error\":{\"message\":\"do-not-expose-upstream-secret\"}}";
+                }
             } else {
                 unexpectedRequests.incrementAndGet();
                 status = 404;
@@ -136,6 +156,9 @@ class TossAccountLinkIntegrationTest {
             assertEquals(1, json.readTree(get(aliceToken, "").body()).size());
             assertEquals(0, json.readTree(get(bobToken, "").body()).size());
             assertEquals(1, tokenRequests.get(), "A live client token should be reused");
+            String connectionId = get(aliceToken, "").body();
+            connectionId = json.readTree(connectionId).get(0).get("connectionId").asText();
+            checkHoldings(aliceToken, bobToken, alice, connectionId);
             assertEquals(0, unexpectedRequests.get(), "Linking must never place orders");
             store.delete("ticket:" + cipher.fingerprint("toss-ticket", ticket));
             assertEquals(201, post("/toss", aliceToken, "same-request", request).statusCode());
@@ -144,6 +167,7 @@ class TossAccountLinkIntegrationTest {
             assertEquals(200, apiDocs.statusCode());
             assertTrue(json.readTree(apiDocs.body()).get("paths").has("/api/v1/broker-connections/toss/verify"));
             assertTrue(apiDocs.body().contains("Idempotency-Key"));
+            assertTrue(json.readTree(apiDocs.body()).get("paths").has("/api/v1/broker-connections/{connectionId}/holdings"));
             // Failed links cannot leave orphaned durable credentials.
             assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM broker_credentials", Integer.class));
         } finally {
@@ -152,6 +176,72 @@ class TossAccountLinkIntegrationTest {
             for (Long id : memberIds) users.deleteById(id);
             toss.stop(0);
         }
+    }
+
+    private void checkHoldings(String aliceToken, String bobToken, Long alice, String connectionId) throws Exception {
+        String path = "/" + connectionId + "/holdings";
+        var unauthenticated = http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/v1/broker-connections" + path)).GET().build(), HttpResponse.BodyHandlers.ofString());
+        assertEquals(401, unauthenticated.statusCode());
+        int before = holdingsRequests.get();
+        assertEquals(404, get(bobToken, path).statusCode());
+        assertEquals(404, get(aliceToken, "/999999999/holdings").statusCode());
+        assertEquals(400, get(aliceToken, "/0/holdings").statusCode());
+        assertEquals(400, get(aliceToken, path + "?symbol=%2Fbad").statusCode());
+        assertEquals(before, holdingsRequests.get(), "Rejected access/input must not reach Toss");
+
+        var response = get(aliceToken, path);
+        assertEquals(200, response.statusCode(), response.body());
+        assertEquals("no-store", response.headers().firstValue("Cache-Control").orElse(""));
+        var body = json.readTree(response.body());
+        assertEquals(connectionId, body.get("connectionId").asText());
+        assertNotNull(body.get("fetchedAt"));
+        var holdings = body.get("holdings");
+        assertEquals(2, holdings.get("items").size());
+        assertTrue(holdings.get("items").get(0).get("quantity").isString());
+        assertEquals("0.1077", holdings.get("items").get(0).get("profitLoss").get("rate").asText());
+        assertEquals("1553", holdings.get("totalPurchaseAmount").get("usd").asText());
+        assertFalse(response.body().contains("test-secret"));
+        assertFalse(response.body().contains("test-toss-token"));
+        assertFalse(response.body().contains("accountSeq"));
+        var empty = json.readTree(get(aliceToken, path + "?symbol=EMPTY").body()).get("holdings");
+        assertEquals(0, empty.get("items").size());
+        assertEquals("0", empty.get("totalPurchaseAmount").get("krw").asText());
+        assertTrue(empty.get("totalPurchaseAmount").get("usd").isNull());
+        var filtered = json.readTree(get(aliceToken, path + "?symbol=005930").body()).get("holdings");
+        assertEquals(1, filtered.get("items").size());
+        assertEquals("005930", filtered.get("items").get(0).get("symbol").asText());
+        assertEquals(1, tokenRequests.get(), "Holdings reads reuse the existing cached token");
+
+        jdbc.update("UPDATE broker_connections SET status='DISCONNECTED' WHERE connection_id=?", Long.valueOf(connectionId));
+        before = holdingsRequests.get();
+        assertEquals(409, get(aliceToken, path).statusCode());
+        assertEquals(before, holdingsRequests.get());
+        jdbc.update("UPDATE broker_connections SET status='CONNECTED' WHERE connection_id=?", Long.valueOf(connectionId));
+
+        rejectNextToken.set(true);
+        before = holdingsRequests.get();
+        assertEquals(200, get(aliceToken, path).statusCode());
+        assertEquals(before + 2, holdingsRequests.get(), "Toss 401 is retried once after token renewal");
+        assertEquals(2, tokenRequests.get());
+
+        holdingsStatus.set(403);
+        before = holdingsRequests.get();
+        var forbidden = get(aliceToken, path);
+        assertEquals(422, forbidden.statusCode());
+        assertFalse(forbidden.body().contains("do-not-expose-upstream-secret"));
+        assertEquals(before + 1, holdingsRequests.get(), "IP restrictions must not trigger retries");
+        assertEquals(2, tokenRequests.get());
+
+        holdingsStatus.set(401);
+        before = holdingsRequests.get();
+        assertEquals(422, get(aliceToken, path).statusCode());
+        assertEquals(before + 2, holdingsRequests.get(), "Repeated 401 must not loop");
+        holdingsStatus.set(429);
+        assertEquals(503, get(aliceToken, path).statusCode());
+        holdingsStatus.set(-1);
+        assertEquals(502, get(aliceToken, path).statusCode());
+        holdingsStatus.set(200);
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM positions WHERE user_id=?", Integer.class, alice));
     }
 
     private Long createUser(List<Long> ids) {
