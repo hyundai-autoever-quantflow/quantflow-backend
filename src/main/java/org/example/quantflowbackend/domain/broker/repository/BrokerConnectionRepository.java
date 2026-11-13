@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Optional;
 
 public interface BrokerConnectionRepository extends JpaRepository<BrokerConnection, Long> {
+    Optional<BrokerConnection> findByConnectionIdAndUserMemberId(Long connectionId, Long userId);
     Optional<BrokerConnection> findByUserMemberIdAndRequestKey(Long userId, String requestKey);
     List<BrokerConnection> findAllByUserMemberIdOrderByConnectionIdDesc(Long userId);
 }
