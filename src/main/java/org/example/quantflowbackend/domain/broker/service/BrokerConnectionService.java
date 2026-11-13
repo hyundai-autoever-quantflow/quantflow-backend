@@ -72,7 +72,7 @@ public class BrokerConnectionService {
         String fingerprint = cipher.fingerprint("broker-account", "TOSS:" + current.accountNo().replace("-", ""));
         String credentialId = UUID.randomUUID().toString();
         String payload = cipher.encrypt(json.writeValueAsString(
-                new CredentialData(ticket.clientId(), ticket.clientSecret(), current.accountSeq())));
+                new BrokerCredentialData(ticket.clientId(), ticket.clientSecret(), current.accountSeq())));
         String ticketHash = cipher.fingerprint("toss-used-ticket", request.verificationTicket());
         try {
             return new TransactionTemplate(transactionManager).execute(status -> {
@@ -137,8 +137,5 @@ public class BrokerConnectionService {
 
     public record TicketData(Long userId, String clientId, String clientSecret, List<TossApiClient.Account> accounts) {
         @Override public String toString() { return "TicketData[REDACTED]"; }
-    }
-    public record CredentialData(String clientId, String clientSecret, Long accountSeq) {
-        @Override public String toString() { return "CredentialData[REDACTED]"; }
     }
 }

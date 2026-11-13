@@ -89,7 +89,7 @@ class BrokerConnectionServiceTest {
         ArgumentCaptor<BrokerCredential> captured = ArgumentCaptor.forClass(BrokerCredential.class);
         verify(credentials).save(captured.capture());
         assertFalse(captured.getValue().getEncryptedPayload().contains("secret"));
-        var data = json.readValue(cipher.decrypt(captured.getValue().getEncryptedPayload()), BrokerConnectionService.CredentialData.class);
+        var data = json.readValue(cipher.decrypt(captured.getValue().getEncryptedPayload()), BrokerCredentialData.class);
         assertEquals(1L, data.accountSeq());
         assertEquals("secret", data.clientSecret());
         verify(tx).commit(any());
