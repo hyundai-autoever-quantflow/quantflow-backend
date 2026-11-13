@@ -37,6 +37,9 @@ class TossAccountLinkIntegrationTest {
     private static final AtomicInteger holdingsRequests = new AtomicInteger();
     private static final AtomicInteger holdingsStatus = new AtomicInteger(200);
     private static final AtomicBoolean rejectNextToken = new AtomicBoolean();
+    private static final AtomicInteger tradingQueryRequests = new AtomicInteger();
+    private static final AtomicInteger tradingQueryStatus = new AtomicInteger(200);
+    private static final AtomicBoolean rejectNextTradingToken = new AtomicBoolean();
     private static HttpServer toss;
     @LocalServerPort int port;
     @Autowired UserRepository users;
@@ -80,6 +83,31 @@ class TossAccountLinkIntegrationTest {
                     body = "{\"result\":null}";
                 } else {
                     body = "{\"error\":{\"message\":\"do-not-expose-upstream-secret\"}}";
+                }
+            } else if (path.equals("/api/v1/buying-power") || path.equals("/api/v1/prices")) {
+                boolean money = path.equals("/api/v1/buying-power");
+                boolean tokenOk = "Bearer test-toss-token".equals(exchange.getRequestHeaders().getFirst("Authorization"));
+                boolean accountHeaderOk = money
+                        ? "1".equals(exchange.getRequestHeaders().getFirst("X-Tossinvest-Account"))
+                        : exchange.getRequestHeaders().getFirst("X-Tossinvest-Account") == null;
+                if (!tokenOk || !accountHeaderOk) {
+                    unexpectedRequests.incrementAndGet();
+                    status = 400;
+                    body = "{}";
+                } else {
+                    tradingQueryRequests.incrementAndGet();
+                    status = rejectNextTradingToken.getAndSet(false) ? 401 : tradingQueryStatus.get();
+                    if (status == 200) {
+                        String query = exchange.getRequestURI().getQuery();
+                        String fixture = money ? ("currency=USD".equals(query) ? "buying-power-usd" : "buying-power-krw")
+                                : ("symbols=AAPL".equals(query) ? "prices-us" : "prices-mixed");
+                        body = new ClassPathResource("toss/" + fixture + ".json").getContentAsString(StandardCharsets.UTF_8);
+                    } else if (status == -1) {
+                        status = 200;
+                        body = "{\"result\":null}";
+                    } else {
+                        body = "{\"error\":{\"message\":\"do-not-expose-trading-secret\"}}";
+                    }
                 }
             } else {
                 unexpectedRequests.incrementAndGet();
@@ -159,6 +187,7 @@ class TossAccountLinkIntegrationTest {
             String connectionId = get(aliceToken, "").body();
             connectionId = json.readTree(connectionId).get(0).get("connectionId").asText();
             checkHoldings(aliceToken, bobToken, alice, connectionId);
+            checkTradingQueries(aliceToken, bobToken, alice, connectionId);
             assertEquals(0, unexpectedRequests.get(), "Linking must never place orders");
             store.delete("ticket:" + cipher.fingerprint("toss-ticket", ticket));
             assertEquals(201, post("/toss", aliceToken, "same-request", request).statusCode());
@@ -168,6 +197,8 @@ class TossAccountLinkIntegrationTest {
             assertTrue(json.readTree(apiDocs.body()).get("paths").has("/api/v1/broker-connections/toss/verify"));
             assertTrue(apiDocs.body().contains("Idempotency-Key"));
             assertTrue(json.readTree(apiDocs.body()).get("paths").has("/api/v1/broker-connections/{connectionId}/holdings"));
+            assertTrue(json.readTree(apiDocs.body()).get("paths").has("/api/v1/broker-connections/{connectionId}/buying-power"));
+            assertTrue(json.readTree(apiDocs.body()).get("paths").has("/api/v1/broker-connections/{connectionId}/prices"));
             // Failed links cannot leave orphaned durable credentials.
             assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM broker_credentials", Integer.class));
         } finally {
@@ -242,6 +273,97 @@ class TossAccountLinkIntegrationTest {
         assertEquals(502, get(aliceToken, path).statusCode());
         holdingsStatus.set(200);
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM positions WHERE user_id=?", Integer.class, alice));
+    }
+
+    private void checkTradingQueries(String aliceToken, String bobToken, Long alice, String connectionId) throws Exception {
+        String moneyPath = "/" + connectionId + "/buying-power?currency=KRW";
+        String pricePath = "/" + connectionId + "/prices?symbols=005930,AAPL";
+        for (String path : List.of(moneyPath, pricePath)) {
+            var unauthenticated = http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/v1/broker-connections" + path)).GET().build(), HttpResponse.BodyHandlers.ofString());
+            assertEquals(401, unauthenticated.statusCode());
+            int before = tradingQueryRequests.get();
+            assertEquals(404, get(bobToken, path).statusCode());
+            assertEquals(before, tradingQueryRequests.get());
+        }
+        int before = tradingQueryRequests.get();
+        for (String invalid : List.of("/0/buying-power?currency=KRW", "/0/prices?symbols=AAPL",
+                "/" + connectionId + "/buying-power", "/" + connectionId + "/buying-power?currency=EUR",
+                "/" + connectionId + "/prices", "/" + connectionId + "/prices?symbols=",
+                "/" + connectionId + "/prices?symbols=AAPL,", "/" + connectionId + "/prices?symbols=%2Fbad")) {
+            assertEquals(400, get(aliceToken, invalid).statusCode(), invalid);
+        }
+        assertEquals(before, tradingQueryRequests.get());
+
+        var money = get(aliceToken, moneyPath);
+        assertEquals(200, money.statusCode(), money.body());
+        assertEquals("no-store", money.headers().firstValue("Cache-Control").orElse(""));
+        var moneyJson = json.readTree(money.body());
+        assertEquals(connectionId, moneyJson.get("connectionId").asText());
+        assertNotNull(moneyJson.get("fetchedAt"));
+        assertEquals("KRW", moneyJson.get("buyingPower").get("currency").asText());
+        assertTrue(moneyJson.get("buyingPower").get("cashBuyingPower").isString());
+        assertEquals("5000000", moneyJson.get("buyingPower").get("cashBuyingPower").asText());
+        var usd = get(aliceToken, "/" + connectionId + "/buying-power?currency=usd");
+        assertEquals(200, usd.statusCode());
+        assertEquals("USD", json.readTree(usd.body()).get("buyingPower").get("currency").asText());
+        assertEquals("3500.5", json.readTree(usd.body()).get("buyingPower").get("cashBuyingPower").asText());
+        var prices = get(aliceToken, pricePath);
+        assertEquals(200, prices.statusCode(), prices.body());
+        assertEquals("no-store", prices.headers().firstValue("Cache-Control").orElse(""));
+        var priceJson = json.readTree(prices.body());
+        assertEquals(connectionId, priceJson.get("connectionId").asText());
+        assertEquals(2, priceJson.get("prices").size());
+        assertEquals("005930", priceJson.get("prices").get(0).get("symbol").asText());
+        assertEquals("72000", priceJson.get("prices").get(0).get("lastPrice").asText());
+        assertTrue(priceJson.get("prices").get(0).get("lastPrice").isString());
+        assertEquals("2026-03-25T00:30:00.123Z", priceJson.get("prices").get(0).get("timestamp").asText());
+        var single = get(aliceToken, "/" + connectionId + "/prices?symbols=aapl,AAPL");
+        assertEquals(200, single.statusCode());
+        assertEquals(1, json.readTree(single.body()).get("prices").size());
+        for (String response : List.of(money.body(), prices.body())) {
+            assertFalse(response.contains("test-secret"));
+            assertFalse(response.contains("test-toss-token"));
+            assertFalse(response.contains("accountSeq"));
+        }
+
+        jdbc.update("UPDATE broker_connections SET status='DISCONNECTED' WHERE connection_id=?", Long.valueOf(connectionId));
+        before = tradingQueryRequests.get();
+        assertEquals(409, get(aliceToken, moneyPath).statusCode());
+        assertEquals(409, get(aliceToken, pricePath).statusCode());
+        assertEquals(before, tradingQueryRequests.get());
+        jdbc.update("UPDATE broker_connections SET status='CONNECTED' WHERE connection_id=?", Long.valueOf(connectionId));
+
+        for (String path : List.of(moneyPath, pricePath)) {
+            int issued = tokenRequests.get();
+            before = tradingQueryRequests.get();
+            rejectNextTradingToken.set(true);
+            assertEquals(200, get(aliceToken, path).statusCode());
+            assertEquals(before + 2, tradingQueryRequests.get());
+            assertEquals(issued + 1, tokenRequests.get());
+        }
+        tradingQueryStatus.set(403);
+        int issued = tokenRequests.get();
+        before = tradingQueryRequests.get();
+        assertEquals(422, get(aliceToken, moneyPath).statusCode());
+        assertEquals(422, get(aliceToken, pricePath).statusCode());
+        assertEquals(before + 2, tradingQueryRequests.get());
+        assertEquals(issued, tokenRequests.get(), "IP restriction must not reissue tokens");
+        tradingQueryStatus.set(401);
+        before = tradingQueryRequests.get();
+        assertEquals(422, get(aliceToken, pricePath).statusCode());
+        assertEquals(before + 2, tradingQueryRequests.get(), "Repeated 401 must not loop");
+        for (int upstreamStatus : List.of(400, 404, 429, 500, -1)) {
+            tradingQueryStatus.set(upstreamStatus);
+            int expected = switch (upstreamStatus) { case 400 -> 400; case 404 -> 404; case -1 -> 502; default -> 503; };
+            for (String path : List.of(moneyPath, pricePath)) {
+                var response = get(aliceToken, path);
+                assertEquals(expected, response.statusCode(), response.body());
+                assertFalse(response.body().contains("do-not-expose-trading-secret"));
+            }
+        }
+        tradingQueryStatus.set(200);
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM positions WHERE user_id=?", Integer.class, alice));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM orders WHERE user_id=?", Integer.class, alice));
     }
 
     private Long createUser(List<Long> ids) {
