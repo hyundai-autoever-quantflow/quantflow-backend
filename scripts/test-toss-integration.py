@@ -50,6 +50,8 @@ def main():
             "JWT_SECRET_BASE64": base64.b64encode(secrets.token_bytes(32)).decode(),
             "BROKER_ENCRYPTION_KEY_BASE64": base64.b64encode(secrets.token_bytes(32)).decode(),
             "RUN_TOSS_INTEGRATION_TESTS": "true",
+            "OPENAI_API_KEY": "sk-isolated-test-not-real",
+            "OPENAI_MODEL": "gpt-6-astra",
         })
         wrapper = "gradlew.bat" if os.name == "nt" else "./gradlew"
         return subprocess.call([wrapper, "test", "--rerun-tasks", *sys.argv[1:]], cwd=repo, env=env)

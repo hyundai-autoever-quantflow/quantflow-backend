@@ -20,6 +20,10 @@ app:
       connect-timeout: 3s
       read-timeout: 5s
 
+  openai:
+    api-key: ${OPENAI_API_KEY}
+    model: ${OPENAI_MODEL}
+
 spring:
   config:
     import: "optional:file:./.env[.properties]"
