@@ -24,6 +24,10 @@ app:
     api-key: ${OPENAI_API_KEY}
     model: ${OPENAI_MODEL}
 
+  naver:
+    client-id: ${NAVER_CLIENT_ID}
+    client-secret: ${NAVER_CLIENT_SECRET}
+
 spring:
   config:
     import: "optional:file:./.env[.properties]"
