@@ -1,7 +1,7 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-const state = { tokens: null, verification: null, pending: null, busy: false };
+const state = { googleIdToken: null, tokens: null, verification: null, pending: null, busy: false };
 
 function message(text, error = false) {
   $('status').textContent = text;
@@ -15,8 +15,19 @@ function resetVerification() {
   $('ticket-status').textContent = '';
 }
 
-function clearSession() {
+function renderTokens() {
+  $('google-id-token').value = state.googleIdToken || '';
+  $('access-token').value = state.tokens?.accessToken || '';
+  $('refresh-token').value = state.tokens?.refreshToken || '';
+}
+
+function clearSession({ keepGoogleIdToken = false } = {}) {
   state.tokens = null;
+  if (!keepGoogleIdToken) {
+    state.googleIdToken = null;
+    $('token-details').open = false;
+  }
+  renderTokens();
   resetVerification();
   $('verify-form').reset();
   $('member').textContent = '로그인 전';
@@ -36,6 +47,10 @@ function renderControls() {
   $('reload-connections').disabled = state.busy || !loggedIn;
   $('logout').disabled = state.busy || !loggedIn;
   $('google-button').inert = state.busy || loggedIn;
+  $('copy-id-token').disabled = !state.googleIdToken;
+  $('copy-login-body').disabled = !state.googleIdToken;
+  $('copy-access-token').disabled = !state.tokens?.accessToken;
+  $('copy-refresh-token').disabled = !state.tokens?.refreshToken;
   if (state.verification) {
     const seconds = Math.max(0, Math.ceil((state.verification.expiresAt - Date.now()) / 1000));
     $('ticket-status').textContent = seconds > 0
@@ -98,6 +113,12 @@ async function reloadConnections() {
 async function login(credential) {
   await run(async () => {
     clearSession();
+    if (typeof credential !== 'string' || !credential) throw new Error('Google ID 토큰을 받지 못했어요. 다시 로그인해주세요.');
+    // Retain the Google token even if the backend login fails, so it can be tested in Swagger.
+    state.googleIdToken = credential;
+    $('token-details').open = true;
+    renderTokens();
+    renderControls();
     message('로그인 중…');
     const tokens = await api('/api/v1/auth/oauth2', {
       authenticated: false,
@@ -105,17 +126,41 @@ async function login(credential) {
     });
     if (!tokens?.accessToken || !tokens?.refreshToken) throw new Error('로그인 응답이 올바르지 않아요.');
     state.tokens = tokens;
+    renderTokens();
     try {
       const member = await api('/api/v1/users/me');
       $('member').textContent = JSON.stringify(member, null, 2);
     } catch (error) {
-      clearSession();
+      clearSession({ keepGoogleIdToken: true });
       throw error;
     }
     await reloadConnections();
     message('로그인 완료. 토스 인증정보를 입력하세요.');
   });
 }
+
+async function copyToken(value, label, fieldId) {
+  if (!value) return;
+  try {
+    await navigator.clipboard.writeText(value);
+    message(`${label}을 복사했어요.`);
+  } catch {
+    const field = $(fieldId);
+    field.focus();
+    field.select();
+    message('자동 복사가 불가능해요. 선택된 토큰을 ⌘+C 또는 Ctrl+C로 복사해주세요.', true);
+  }
+}
+
+$('copy-id-token').addEventListener('click', () =>
+  copyToken(state.googleIdToken, 'Google ID Token', 'google-id-token'));
+$('copy-login-body').addEventListener('click', () =>
+  copyToken(state.googleIdToken ? JSON.stringify({ provider: 'GOOGLE', idToken: state.googleIdToken }, null, 2) : '',
+    '로그인 요청 JSON', 'google-id-token'));
+$('copy-access-token').addEventListener('click', () =>
+  copyToken(state.tokens?.accessToken, 'Access Token', 'access-token'));
+$('copy-refresh-token').addEventListener('click', () =>
+  copyToken(state.tokens?.refreshToken, 'Refresh Token', 'refresh-token'));
 
 $('verify-form').addEventListener('submit', (event) => {
   event.preventDefault();

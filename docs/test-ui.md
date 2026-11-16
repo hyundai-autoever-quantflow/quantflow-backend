@@ -20,7 +20,8 @@
 - 토큰과 검증 티켓은 메모리에만 보관한다. 새로고침·탭 종료 시 초기화된다. 새로고침은 서버 Refresh Token을 폐기하지 않으므로 명시적 로그아웃은 버튼을 사용한다.
 - 연결 재시도에는 같은 Idempotency-Key와 본문을 재사용한다.
 - 로그인 만료 시 다시 구글 로그인한다. 토큰 자동 재발급과 자동매수는 추가하지 않았다.
-- 결과 영역에는 회원·연결 정보만 표시하며 토큰·Secret은 출력하지 않는다.
+- 회원·연결 결과 영역과 별도로 **Swagger용 토큰 확인·복사** 영역에서 Google ID Token과 서비스 Access/Refresh Token을 확인할 수 있다. Google ID Token은 로그인 API의 idToken 필드에, Access Token은 Swagger Authorize에 사용한다. 로그인 요청 JSON 전체 복사도 지원한다.
+- Google ID Token은 서버 로그인 실패 시에도 확인할 수 있다. 토큰은 브라우저 저장소·URL·로그에 기록하지 않으며 새로고침·로그아웃 시 지운다. 토스 Secret은 결과 영역에 출력하지 않는다.
 - 테스트 화면은 app.test-ui.enabled 기본값 false이고, 로컬 .env에서만 활성화했다. 비활성화하면 로그인한 사용자에게도 /test-ui/** 접근을 거절하고 설정 컨트롤러를 등록하지 않는다.
 - /test-ui/config는 공개 식별자인 Google Web Client ID만 반환한다.
 

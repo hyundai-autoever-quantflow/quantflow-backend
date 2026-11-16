@@ -9,7 +9,7 @@
     body { font-family: sans-serif; max-width: 700px; margin: 24px auto; padding: 0 12px; }
     section { margin: 24px 0; }
     label { display: block; margin: 12px 0; }
-    input, select { box-sizing: border-box; width: 100%; padding: 6px; }
+    input, select, textarea { box-sizing: border-box; width: 100%; padding: 6px; }
     button { margin: 4px 4px 4px 0; padding: 6px 10px; }
     pre { white-space: pre-wrap; overflow-wrap: anywhere; }
     #status[data-error="true"] { color: #b00020; }
@@ -27,6 +27,23 @@
     <div id="google-button"></div>
     <button id="logout" type="button" disabled>로그아웃</button>
     <pre id="member">로그인 전</pre>
+    <details id="token-details">
+      <summary>Swagger용 토큰 확인·복사</summary>
+      <p>Google 로그인 후 자동으로 표시돼요. 토큰은 새로고침·로그아웃 시 지워져요.</p>
+      <label for="google-id-token">Google ID Token — /api/v1/auth/oauth2 요청의 idToken에 입력
+        <textarea id="google-id-token" rows="3" readonly autocomplete="off" spellcheck="false"></textarea>
+      </label>
+      <button id="copy-id-token" type="button" disabled>ID Token 복사</button>
+      <button id="copy-login-body" type="button" disabled>로그인 요청 JSON 복사</button>
+      <label for="access-token">서비스 Access Token — Swagger Authorize에 입력
+        <textarea id="access-token" rows="3" readonly autocomplete="off" spellcheck="false"></textarea>
+      </label>
+      <button id="copy-access-token" type="button" disabled>Access Token 복사</button>
+      <label for="refresh-token">서비스 Refresh Token — 재발급·로그아웃 요청에 입력
+        <textarea id="refresh-token" rows="3" readonly autocomplete="off" spellcheck="false"></textarea>
+      </label>
+      <button id="copy-refresh-token" type="button" disabled>Refresh Token 복사</button>
+    </details>
   </section>
 
   <section aria-labelledby="verify-title">
