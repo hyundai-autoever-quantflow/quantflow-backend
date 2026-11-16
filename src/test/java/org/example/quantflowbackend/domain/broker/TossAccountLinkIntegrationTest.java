@@ -6,6 +6,9 @@ import org.example.quantflowbackend.domain.broker.security.BrokerSecretCipher;
 import org.example.quantflowbackend.domain.user.domain.*;
 import org.example.quantflowbackend.domain.user.repository.UserRepository;
 import org.example.quantflowbackend.global.security.JwtTokenProvider;
+import org.example.quantflowbackend.global.ai.OpenAiResponseClient;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,6 +31,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.*;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @EnabledIfEnvironmentVariable(named = "RUN_TOSS_INTEGRATION_TESTS", matches = "true")
@@ -47,6 +52,7 @@ class TossAccountLinkIntegrationTest {
     @Autowired JdbcTemplate jdbc;
     @Autowired BrokerSecretCipher cipher;
     @Autowired BrokerTemporaryStore store;
+    @MockitoBean OpenAiResponseClient openAiResponseClient;
     private final HttpClient http = HttpClient.newHttpClient();
     private final JsonMapper json = new JsonMapper();
 
@@ -146,6 +152,7 @@ class TossAccountLinkIntegrationTest {
             Long bob = createUser(memberIds);
             String aliceToken = jwt.createAccessToken(alice);
             String bobToken = jwt.createAccessToken(bob);
+            checkNewsAnalysisRequest(aliceToken);
             assertEquals(401, post("/toss/verify", null, null, "{}").statusCode());
             assertEquals(400, post("/toss/verify", aliceToken, null, "{}").statusCode());
             var verified = verify(aliceToken);
@@ -196,6 +203,11 @@ class TossAccountLinkIntegrationTest {
             assertEquals(200, apiDocs.statusCode());
             assertTrue(json.readTree(apiDocs.body()).get("paths").has("/api/v1/broker-connections/toss/verify"));
             assertTrue(apiDocs.body().contains("Idempotency-Key"));
+            var analysisPath = json.readTree(apiDocs.body()).get("paths").get("/api/v1/analyses");
+            assertNotNull(analysisPath);
+            assertTrue(analysisPath.has("post"));
+            assertFalse(analysisPath.has("get"));
+            assertTrue(analysisPath.get("post").get("requestBody").get("content").has("application/json"));
             assertTrue(json.readTree(apiDocs.body()).get("paths").has("/api/v1/broker-connections/{connectionId}/holdings"));
             assertTrue(json.readTree(apiDocs.body()).get("paths").has("/api/v1/broker-connections/{connectionId}/buying-power"));
             assertTrue(json.readTree(apiDocs.body()).get("paths").has("/api/v1/broker-connections/{connectionId}/prices"));
@@ -364,6 +376,33 @@ class TossAccountLinkIntegrationTest {
         tradingQueryStatus.set(200);
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM positions WHERE user_id=?", Integer.class, alice));
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM orders WHERE user_id=?", Integer.class, alice));
+    }
+
+    private void checkNewsAnalysisRequest(String token) throws Exception {
+        String summary = "학습용 요약 응답";
+        when(openAiResponseClient.generate(anyString(), anyString())).thenReturn(summary);
+        String longContent = "기사 본문: 한글과 줄바꿈, 특수문자 []{}&?를 포함합니다.\n".repeat(500);
+        var response = postNews(token, json.writeValueAsString(Map.of("title", "긴 기사 테스트", "content", longContent)));
+        assertEquals(200, response.statusCode(), response.body());
+        assertEquals("no-store", response.headers().firstValue("Cache-Control").orElse(""));
+        assertEquals(summary, json.readTree(response.body()).get("summary").asText());
+        var input = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(openAiResponseClient).generate(anyString(), input.capture());
+        assertTrue(input.getValue().contains(longContent));
+        clearInvocations(openAiResponseClient);
+        for (String body : List.of("{}", "{\"title\":\"제목\",\"content\":\" \"}", "not-json",
+                json.writeValueAsString(Map.of("title", "제목", "content", "가".repeat(50001))))) {
+            assertEquals(400, postNews(token, body).statusCode());
+        }
+        assertEquals(401, postNews(null, "{\"title\":\"제목\",\"content\":\"본문\"}").statusCode());
+        verifyNoInteractions(openAiResponseClient);
+    }
+
+    private HttpResponse<String> postNews(String token, String body) throws Exception {
+        var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/v1/analyses"))
+                .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body));
+        if (token != null) request.header("Authorization", "Bearer " + token);
+        return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
     }
 
     private Long createUser(List<Long> ids) {
