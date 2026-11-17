@@ -9,7 +9,7 @@ import java.util.regex.Pattern;
 @Component
 public class NewsTextCleaner {
     private static final Pattern HIGHLIGHT_TAG =
-            Pattern.compile("</>b\\s*>", Pattern.CASE_INSENSITIVE);
+            Pattern.compile("</?b\\s*>", Pattern.CASE_INSENSITIVE);
 
     private static final Pattern WHITESPACE =
             Pattern.compile("[\\s\\p{Z}]+");
