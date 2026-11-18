@@ -1,6 +1,7 @@
 package org.example.quantflowbackend.domain.recommendation.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -8,16 +9,17 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.example.quantflowbackend.domain.recommendation.dto.NewsAnalysisRequest;
-import org.example.quantflowbackend.domain.recommendation.dto.NewsAnalysisResponse;
-import org.example.quantflowbackend.domain.recommendation.dto.SearchedNewsAnalysisRequest;
-import org.example.quantflowbackend.domain.recommendation.dto.SearchedNewsAnalysisResponse;
+import org.example.quantflowbackend.domain.recommendation.dto.*;
 import org.example.quantflowbackend.domain.recommendation.service.NewsAnalysisService;
 import org.example.quantflowbackend.domain.recommendation.service.SearchedNewsAnalysisService;
 import org.springframework.http.CacheControl;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/v1/analyses")
@@ -74,5 +76,26 @@ public class NewsAnalysisController {
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
                 .body(response);
+    }
+
+    @PostMapping("/recommendation")
+    @Operation(summary = "뉴스 기반 종목 추천 미리보기")
+    public ResponseEntity<SearchedStockRecommendationResponse> recommend(
+            @Parameter(hidden = true) @AuthenticationPrincipal Jwt jwt,
+            @Valid @RequestBody SearchedNewsAnalysisRequest request
+    ) {
+        Long memberId;
+        try {
+            memberId = Long.valueOf(jwt.getSubject());
+        } catch (NumberFormatException exception) {
+            throw new ResponseStatusException(
+                    HttpStatus.UNAUTHORIZED, "회원 인증이 필요합니다."
+            );
+        }
+
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(searchedNewsAnalysisService.recommend(memberId, request));
+
     }
 }
