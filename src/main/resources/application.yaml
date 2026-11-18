@@ -23,6 +23,8 @@ app:
   stock-sync:
     client-id: ${STOCK_SYNC_TOSS_CLIENT_ID:}
     client-secret: ${STOCK_SYNC_TOSS_CLIENT_SECRET:}
+    schedule-enabled: ${STOCK_SYNC_SCHEDULE_ENABLED:false}
+    cron: ${STOCK_SYNC_CRON:0 0 7 * * *}
 
   openai:
     api-key: ${OPENAI_API_KEY}
