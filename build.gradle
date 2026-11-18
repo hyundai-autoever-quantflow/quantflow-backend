@@ -29,6 +29,10 @@ dependencies {
     implementation 'org.flywaydb:flyway-database-postgresql'
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.2.0'
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    implementation('com.openai:openai-java:4.105.0') {
+        // Springdoc supplies the Jakarta variant with the same annotation classes.
+        exclude group: 'io.swagger.core.v3', module: 'swagger-annotations'
+    }
     compileOnly 'org.projectlombok:lombok'
     runtimeOnly 'org.postgresql:postgresql'
     annotationProcessor 'org.projectlombok:lombok'
