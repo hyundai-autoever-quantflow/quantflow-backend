@@ -12,6 +12,8 @@ import lombok.RequiredArgsConstructor;
 import org.example.quantflowbackend.domain.recommendation.dto.*;
 import org.example.quantflowbackend.domain.recommendation.service.NewsAnalysisService;
 import org.example.quantflowbackend.domain.recommendation.service.SearchedNewsAnalysisService;
+import org.springframework.cglib.core.Local;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -20,6 +22,8 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
+
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/api/v1/analyses")
@@ -80,8 +84,17 @@ public class NewsAnalysisController {
 
     @PostMapping("/recommendation")
     @Operation(summary = "뉴스 기반 종목 추천 미리보기")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "추천 종목 또는 추천 보류"),
+            @ApiResponse(responseCode = "400", description = "요청 또는 기준일 오류", content = @Content),
+            @ApiResponse(responseCode = "401", description = "서비스 로그인 필요", content = @Content),
+            @ApiResponse(responseCode = "502", description = "뉴스 또는 AI 응답 처리 실패", content = @Content),
+            @ApiResponse(responseCode = "503", description = "기준일 랭킹 미저장 또는 외부 서비스 사용 불가", content = @Content)
+    })
     public ResponseEntity<SearchedStockRecommendationResponse> recommend(
             @Parameter(hidden = true) @AuthenticationPrincipal Jwt jwt,
+            @RequestParam("rankingDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate rankingDate,
             @Valid @RequestBody SearchedNewsAnalysisRequest request
     ) {
         Long memberId;
@@ -95,7 +108,6 @@ public class NewsAnalysisController {
 
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(searchedNewsAnalysisService.recommend(memberId, request));
-
+                .body(searchedNewsAnalysisService.recommend(memberId, rankingDate, request));
     }
 }
