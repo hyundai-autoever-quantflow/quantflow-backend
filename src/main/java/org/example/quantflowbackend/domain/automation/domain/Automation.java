@@ -103,4 +103,14 @@ public class Automation {
                 .settings(settings)
                 .build();
     }
+
+    public void enable(TradingSettings settings) {
+        this.settings = Objects.requireNonNull(settings);
+        this.desiredState = AutomationDesiredState.RUNNING;
+    }
+
+    public void stop() {
+        this.desiredState = AutomationDesiredState.STOPPED;
+        this.nextRunAt = null;
+    }
 }

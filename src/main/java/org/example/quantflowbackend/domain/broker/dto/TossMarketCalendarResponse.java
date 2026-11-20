@@ -10,7 +10,8 @@ import java.time.OffsetDateTime;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record TossMarketCalendarResponse(
         @NotNull @Valid MarketDay today,
-        @NotNull @Valid MarketDay previousBusinessDay
+        @NotNull @Valid MarketDay previousBusinessDay,
+        @Valid MarketDay nextBusinessDay
 ) {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record MarketDay(

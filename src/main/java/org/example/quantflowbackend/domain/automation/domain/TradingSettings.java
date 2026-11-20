@@ -63,13 +63,13 @@ public class TradingSettings extends BaseCreatedTimeEntity {
     @Column(name = "max_buys_per_day", nullable = false)
     private Short maxBuysPerDay;
 
-    @Column(name = "take_profit_pct", nullable = false, precision = 9, scale = 4)
+    @Column(name = "take_profit_pct", precision = 9, scale = 4)
     private BigDecimal takeProfitPct;
 
-    @Column(name = "stop_loss_pct", nullable = false, precision = 9, scale = 4)
+    @Column(name = "stop_loss_pct", precision = 9, scale = 4)
     private BigDecimal stopLossPct;
 
-    @Column(name = "max_holding_minutes", nullable = false)
+    @Column(name = "max_holding_minutes")
     private Integer maxHoldingMinutes;
 
     @Column(name = "daily_loss_limit_krw", nullable = false, precision = 20, scale = 0)
@@ -112,9 +112,9 @@ public class TradingSettings extends BaseCreatedTimeEntity {
         this.effectiveTradingDate = Objects.requireNonNull(effectiveTradingDate, "필수 값입니다: effectiveTradingDate");
         this.entryBudgetKrw = Objects.requireNonNull(entryBudgetKrw, "필수 값입니다: entryBudgetKrw");
         this.maxBuysPerDay = Objects.requireNonNull(maxBuysPerDay, "필수 값입니다: maxBuysPerDay");
-        this.takeProfitPct = Objects.requireNonNull(takeProfitPct, "필수 값입니다: takeProfitPct");
-        this.stopLossPct = Objects.requireNonNull(stopLossPct, "필수 값입니다: stopLossPct");
-        this.maxHoldingMinutes = Objects.requireNonNull(maxHoldingMinutes, "필수 값입니다: maxHoldingMinutes");
+        this.takeProfitPct = takeProfitPct;
+        this.stopLossPct = stopLossPct;
+        this.maxHoldingMinutes = maxHoldingMinutes;
         this.dailyLossLimitKrw = Objects.requireNonNull(dailyLossLimitKrw, "필수 값입니다: dailyLossLimitKrw");
         this.riskLimits = new HashMap<>(Objects.requireNonNull(riskLimits, "필수 값입니다: riskLimits"));
         this.strategyVersion = Objects.requireNonNull(strategyVersion, "필수 값입니다: strategyVersion");
@@ -152,5 +152,39 @@ public class TradingSettings extends BaseCreatedTimeEntity {
                 .requestKey(requestKey)
                 .requestHash(requestHash)
                 .build();
+    }
+
+    public static TradingSettings createForAutoBuy(
+            User user,
+            Integer version,
+            LocalDate effectiveTradingDate,
+            BigDecimal entryBudgetKrw,
+            Short maxBuysPerDay,
+            BigDecimal dailyLossLimitKrw,
+            String requestKey,
+            String requestHash
+    ) {
+        return TradingSettings.create(
+                user,
+                version,
+                effectiveTradingDate,
+                entryBudgetKrw,
+                maxBuysPerDay,
+                null,
+                null,
+                null,
+                dailyLossLimitKrw,
+                Map.of(),
+                "auto-buy-v1",
+                requestKey,
+                requestHash
+        );
+    }
+
+    public void confirm(LocalDateTime now) {
+        if (status == TradingSettingsStatus.SCHEDULED) {
+            this.status = TradingSettingsStatus.ACTIVE;
+            this.confirmedAt = Objects.requireNonNull(now);
+        }
     }
 }
