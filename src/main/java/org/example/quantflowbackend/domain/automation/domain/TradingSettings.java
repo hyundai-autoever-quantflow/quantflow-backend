@@ -180,4 +180,11 @@ public class TradingSettings extends BaseCreatedTimeEntity {
                 requestHash
         );
     }
+
+    public void confirm(LocalDateTime now) {
+        if (status == TradingSettingsStatus.SCHEDULED) {
+            this.status = TradingSettingsStatus.ACTIVE;
+            this.confirmedAt = Objects.requireNonNull(now);
+        }
+    }
 }
