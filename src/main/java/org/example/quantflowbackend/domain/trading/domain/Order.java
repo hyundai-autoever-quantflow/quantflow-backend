@@ -231,4 +231,45 @@ public class Order extends BaseTimeEntity {
                 .expiresAt(expiresAt)
                 .build();
     }
+
+    public void beginSubmission() {
+        if (status != OrderStatus.CREATED) {
+            throw new IllegalStateException("준비된 주문만 전송할 수 있습니다.");
+        }
+        status = OrderStatus.SUBMITTING;
+    }
+
+    public void recordSubmission(OrderStatus result, String brokerOrderId, String reason) {
+        if (status != OrderStatus.SUBMITTING) {
+            throw new IllegalStateException("전송 중인 주문만 결과를 기록할 수 있습니다.");
+        }
+        switch (result) {
+            case ACCEPTED -> {
+                this.brokerOrderNo = Objects.requireNonNull(brokerOrderId);
+                this.brokerOrderDate = recommendationTradingDate;
+            }
+            case REJECTED, UNKNOWN -> this.rejectionReason = reason;
+            default -> throw new IllegalArgumentException("지원하지 않는 주문 전송 결과입니다.");
+        }
+        status = result;
+    }
+
+    public boolean applyBrokerStatus(OrderStatus newStatus, BigDecimal newFilledQuantity) {
+        if (brokerOrderNo == null || status == OrderStatus.FILLED || status == OrderStatus.CANCELED
+                || status == OrderStatus.REJECTED || newFilledQuantity.compareTo(filledQuantity) < 0
+                || newFilledQuantity.compareTo(quantity) > 0) {
+            return false;
+        }
+        if ((newStatus == OrderStatus.FILLED && newFilledQuantity.compareTo(quantity) != 0)
+                || (newStatus == OrderStatus.PARTIALLY_FILLED
+                    && (newFilledQuantity.signum() <= 0 || newFilledQuantity.compareTo(quantity) >= 0))) {
+            return false;
+        }
+        if (newStatus == status && newFilledQuantity.compareTo(filledQuantity) == 0) {
+            return false;
+        }
+        status = newStatus;
+        filledQuantity = newFilledQuantity;
+        return true;
+    }
 }

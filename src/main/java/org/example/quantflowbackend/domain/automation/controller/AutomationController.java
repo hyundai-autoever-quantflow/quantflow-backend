@@ -12,6 +12,8 @@ import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.example.quantflowbackend.domain.automation.service.AutomationService;
 import org.example.quantflowbackend.domain.automation.service.AutomationService.AutomationResponse;
+import org.example.quantflowbackend.domain.trading.service.AutoBuyOrderExecutionService;
+import org.example.quantflowbackend.domain.trading.service.AutoBuyOrderExecutionService.OrderResult;
 import org.example.quantflowbackend.domain.trading.service.BuyOrderPreviewService;
 import org.example.quantflowbackend.domain.trading.service.BuyOrderPreviewService.PreviewResponse;
 import org.springframework.http.CacheControl;
@@ -31,6 +33,7 @@ import java.math.BigDecimal;
 public class AutomationController {
     private final AutomationService service;
     private final BuyOrderPreviewService buyOrderPreviewService;
+    private final AutoBuyOrderExecutionService orders;
 
     @PostMapping("/enable")
     @Operation(summary = "계좌 자동매수 켜기")
@@ -70,6 +73,28 @@ public class AutomationController {
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
                 .body(buyOrderPreviewService.preview(memberId(jwt), connectionId));
+    }
+
+    @GetMapping("/orders/today")
+    @Operation(summary = "오늘의 자동매수 주문 상태 조회")
+    public ResponseEntity<OrderResult> todayOrder(
+            @Parameter(hidden = true) @AuthenticationPrincipal Jwt jwt,
+            @PathVariable("connectionId") Long connectionId
+    ) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(orders.getToday(memberId(jwt), connectionId));
+    }
+
+    @PostMapping("/orders/{orderId}/refresh")
+    @Operation(summary = "토스증권 주문 상태 갱신",
+            description = "증권사 주문 ID가 확인된 주문의 상태와 누적 체결 수량을 갱신합니다.")
+    public ResponseEntity<OrderResult> refreshOrder(
+            @Parameter(hidden = true) @AuthenticationPrincipal Jwt jwt,
+            @PathVariable("connectionId") Long connectionId,
+            @PathVariable("orderId") Long orderId
+    ) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(orders.refresh(memberId(jwt), connectionId, orderId));
     }
 
     private ResponseEntity<AutomationResponse> response(AutomationResponse result) {
