@@ -12,6 +12,8 @@ import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.example.quantflowbackend.domain.automation.service.AutomationService;
 import org.example.quantflowbackend.domain.automation.service.AutomationService.AutomationResponse;
+import org.example.quantflowbackend.domain.trading.service.BuyOrderPreviewService;
+import org.example.quantflowbackend.domain.trading.service.BuyOrderPreviewService.PreviewResponse;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -28,6 +30,7 @@ import java.math.BigDecimal;
 @SecurityRequirement(name = "bearerAuth")
 public class AutomationController {
     private final AutomationService service;
+    private final BuyOrderPreviewService buyOrderPreviewService;
 
     @PostMapping("/enable")
     @Operation(summary = "계좌 자동매수 켜기")
@@ -55,6 +58,18 @@ public class AutomationController {
             @PathVariable("connectionId") Long connectionId
     ) {
         return response(service.get(memberId(jwt), connectionId));
+    }
+
+    @GetMapping("/order-preview")
+    @Operation(summary = "오늘 추천 종목의 자동매수 예상 수량 조회",
+            description = "조회한 현재가와 현금 매수 가능 금액을 기준으로 수수료 반영 전 예상 수량을 계산합니다.")
+    public ResponseEntity<PreviewResponse> preview(
+            @Parameter(hidden = true) @AuthenticationPrincipal Jwt jwt,
+            @PathVariable("connectionId") Long connectionId
+    ) {
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(buyOrderPreviewService.preview(memberId(jwt), connectionId));
     }
 
     private ResponseEntity<AutomationResponse> response(AutomationResponse result) {
