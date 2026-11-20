@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.example.quantflowbackend.domain.recommendation.dto.*;
+import org.example.quantflowbackend.domain.recommendation.service.DailyRecommendationService;
 import org.example.quantflowbackend.domain.recommendation.service.NewsAnalysisService;
 import org.example.quantflowbackend.domain.recommendation.service.SearchedNewsAnalysisService;
 import org.springframework.cglib.core.Local;
@@ -33,6 +34,7 @@ import java.time.LocalDate;
 public class NewsAnalysisController {
     private final NewsAnalysisService newsAnalysisService;
     private final SearchedNewsAnalysisService searchedNewsAnalysisService;
+    private final DailyRecommendationService dailyRecommendationService;
 
     @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "뉴스 요약", description = """
@@ -109,5 +111,18 @@ public class NewsAnalysisController {
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
                 .body(searchedNewsAnalysisService.recommend(memberId, rankingDate, request));
+    }
+
+    @GetMapping("/recommendation/today")
+    @Operation(summary = "오늘 저장된 공통 종목 추천 조회")
+    public ResponseEntity<DailyRecommendation> today() {
+        var result = dailyRecommendationService.findToday()
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "오늘 저장된 추천 결과가 없습니다."
+                ));
+
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(result);
     }
 }

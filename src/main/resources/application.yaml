@@ -38,6 +38,11 @@ app:
     schedule-enabled: ${RANKING_SNAPSHOT_SCHEDULE_ENABLED:false}
     cron: "${RANKING_SNAPSHOT_CRON:0 10 21 * * MON-FRI}"
 
+  daily-recommendation:
+    schedule-enabled: ${DAILY_RECOMMENDATION_SCHEDULE_ENABLED:false}
+    cron: "${DAILY_RECOMMENDATION_CRON:0 30 7 * * MON-FRI}"
+    query: "${DAILY_RECOMMENDATION_QUERY:증시}"
+
 spring:
   config:
     import: "optional:file:./.env[.properties]"
