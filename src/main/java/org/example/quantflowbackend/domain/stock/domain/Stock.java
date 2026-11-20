@@ -97,4 +97,34 @@ public class Stock {
                 .instrumentType(instrumentType)
                 .build();
     }
+
+    public void updateListingInfo(
+            String companyName,
+            String instrumentType,
+            boolean commonShare,
+            String isinCode,
+            LocalDateTime checkedAt
+    ) {
+        this.companyName = Objects.requireNonNull(companyName);
+        this.instrumentType = Objects.requireNonNull(instrumentType);
+
+        Map<String, Object> flags = new HashMap<>(this.marketFlags);
+        flags.put("isCommonShare", commonShare);
+        flags.put("listingProvider", "TOSS");
+
+        if (isinCode != null && !isinCode.isBlank()) {
+            flags.put("isinCode", isinCode);
+        } else {
+            flags.remove("isinCode");
+        }
+
+        this.marketFlags = flags;
+        this.isTradable = true;
+        this.marketStatusAt = Objects.requireNonNull(checkedAt);
+    }
+
+    public void deactivateListing(LocalDateTime checkedAt) {
+        this.isTradable = false;
+        this.marketStatusAt = Objects.requireNonNull(checkedAt);
+    }
 }

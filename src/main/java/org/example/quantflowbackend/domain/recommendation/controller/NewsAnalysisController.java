@@ -1,6 +1,7 @@
 package org.example.quantflowbackend.domain.recommendation.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -8,16 +9,22 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.example.quantflowbackend.domain.recommendation.dto.NewsAnalysisRequest;
-import org.example.quantflowbackend.domain.recommendation.dto.NewsAnalysisResponse;
-import org.example.quantflowbackend.domain.recommendation.dto.SearchedNewsAnalysisRequest;
-import org.example.quantflowbackend.domain.recommendation.dto.SearchedNewsAnalysisResponse;
+import org.example.quantflowbackend.domain.recommendation.dto.*;
+import org.example.quantflowbackend.domain.recommendation.service.DailyRecommendationService;
 import org.example.quantflowbackend.domain.recommendation.service.NewsAnalysisService;
 import org.example.quantflowbackend.domain.recommendation.service.SearchedNewsAnalysisService;
+import org.springframework.cglib.core.Local;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.CacheControl;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/api/v1/analyses")
@@ -27,6 +34,7 @@ import org.springframework.web.bind.annotation.*;
 public class NewsAnalysisController {
     private final NewsAnalysisService newsAnalysisService;
     private final SearchedNewsAnalysisService searchedNewsAnalysisService;
+    private final DailyRecommendationService dailyRecommendationService;
 
     @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "뉴스 요약", description = """
@@ -74,5 +82,47 @@ public class NewsAnalysisController {
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
                 .body(response);
+    }
+
+    @PostMapping("/recommendation")
+    @Operation(summary = "뉴스 기반 종목 추천 미리보기")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "추천 종목 또는 추천 보류"),
+            @ApiResponse(responseCode = "400", description = "요청 또는 기준일 오류", content = @Content),
+            @ApiResponse(responseCode = "401", description = "서비스 로그인 필요", content = @Content),
+            @ApiResponse(responseCode = "502", description = "뉴스 또는 AI 응답 처리 실패", content = @Content),
+            @ApiResponse(responseCode = "503", description = "기준일 랭킹 미저장 또는 외부 서비스 사용 불가", content = @Content)
+    })
+    public ResponseEntity<SearchedStockRecommendationResponse> recommend(
+            @Parameter(hidden = true) @AuthenticationPrincipal Jwt jwt,
+            @RequestParam("rankingDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate rankingDate,
+            @Valid @RequestBody SearchedNewsAnalysisRequest request
+    ) {
+        Long memberId;
+        try {
+            memberId = Long.valueOf(jwt.getSubject());
+        } catch (NumberFormatException exception) {
+            throw new ResponseStatusException(
+                    HttpStatus.UNAUTHORIZED, "회원 인증이 필요합니다."
+            );
+        }
+
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(searchedNewsAnalysisService.recommend(memberId, rankingDate, request));
+    }
+
+    @GetMapping("/recommendation/today")
+    @Operation(summary = "오늘 저장된 공통 종목 추천 조회")
+    public ResponseEntity<DailyRecommendation> today() {
+        var result = dailyRecommendationService.findToday()
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "오늘 저장된 추천 결과가 없습니다."
+                ));
+
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(result);
     }
 }

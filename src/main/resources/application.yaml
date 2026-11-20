@@ -20,6 +20,12 @@ app:
       connect-timeout: 3s
       read-timeout: 5s
 
+  stock-sync:
+    client-id: ${STOCK_SYNC_TOSS_CLIENT_ID:}
+    client-secret: ${STOCK_SYNC_TOSS_CLIENT_SECRET:}
+    schedule-enabled: ${STOCK_SYNC_SCHEDULE_ENABLED:false}
+    cron: ${STOCK_SYNC_CRON:0 0 7 * * *}
+
   openai:
     api-key: ${OPENAI_API_KEY}
     model: ${OPENAI_MODEL}
@@ -27,6 +33,15 @@ app:
   naver:
     client-id: ${NAVER_CLIENT_ID}
     client-secret: ${NAVER_CLIENT_SECRET}
+
+  ranking-snapshot:
+    schedule-enabled: ${RANKING_SNAPSHOT_SCHEDULE_ENABLED:false}
+    cron: "${RANKING_SNAPSHOT_CRON:0 10 21 * * MON-FRI}"
+
+  daily-recommendation:
+    schedule-enabled: ${DAILY_RECOMMENDATION_SCHEDULE_ENABLED:false}
+    cron: "${DAILY_RECOMMENDATION_CRON:0 30 7 * * MON-FRI}"
+    query: "${DAILY_RECOMMENDATION_QUERY:증시}"
 
 spring:
   config:
