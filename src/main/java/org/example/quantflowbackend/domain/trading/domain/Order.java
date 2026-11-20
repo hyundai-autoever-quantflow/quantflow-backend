@@ -43,9 +43,12 @@ public class Order extends BaseTimeEntity {
     @Column(name = "order_id")
     private Long orderId;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "analysis_id", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "analysis_id")
     private Analysis analysis;
+
+    @Column(name = "recommendation_trading_date")
+    private LocalDate recommendationTradingDate;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = true)
     @JoinColumn(name = "position_id", nullable = true)
@@ -123,6 +126,7 @@ public class Order extends BaseTimeEntity {
     @Builder
     private Order(
             Analysis analysis,
+            LocalDate recommendationTradingDate,
             Position position,
             Stock stock,
             String clientOrderKey,
@@ -138,7 +142,11 @@ public class Order extends BaseTimeEntity {
             BigDecimal referencePrice,
             LocalDateTime expiresAt
     ) {
-        this.analysis = Objects.requireNonNull(analysis, "필수 값입니다: analysis");
+        if ((analysis == null) == (recommendationTradingDate == null)) {
+            throw new IllegalArgumentException("주문 출처는 하나만 지정해야 합니다.");
+        }
+        this.analysis = analysis;
+        this.recommendationTradingDate = recommendationTradingDate;
         this.position = position;
         this.stock = Objects.requireNonNull(stock, "필수 값입니다: stock");
         this.clientOrderKey = Objects.requireNonNull(clientOrderKey, "필수 값입니다: clientOrderKey");
@@ -182,6 +190,39 @@ public class Order extends BaseTimeEntity {
                 .quantity(quantity)
                 .limitPrice(limitPrice)
                 .triggerType(triggerType)
+                .decisionSnapshot(decisionSnapshot)
+                .user(user)
+                .connection(connection)
+                .settings(settings)
+                .referencePrice(referencePrice)
+                .expiresAt(expiresAt)
+                .build();
+    }
+
+    public static Order createAutoBuy(
+            LocalDate recommendationTradingDate,
+            Stock stock,
+            String clientOrderKey,
+            BigDecimal quantity,
+            BigDecimal limitPrice,
+            Map<String, Object> decisionSnapshot,
+            User user,
+            BrokerConnection connection,
+            TradingSettings settings,
+            BigDecimal referencePrice,
+            LocalDateTime expiresAt
+    ) {
+        return Order.builder()
+                .recommendationTradingDate(
+                        Objects.requireNonNull(recommendationTradingDate)
+                )
+                .stock(stock)
+                .clientOrderKey(clientOrderKey)
+                .side(OrderSide.BUY)
+                .orderType(OrderType.LIMIT)
+                .quantity(quantity)
+                .limitPrice(Objects.requireNonNull(limitPrice))
+                .triggerType(OrderTriggerType.ENTRY_RULE)
                 .decisionSnapshot(decisionSnapshot)
                 .user(user)
                 .connection(connection)
