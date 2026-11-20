@@ -23,6 +23,9 @@ public record TossMarketCalendarResponse(
     public record IntegratedSessions(@Valid RegularSession regularMarket) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record RegularSession(@NotNull OffsetDateTime endTime) {}
+    public record RegularSession(
+            OffsetDateTime startTime,
+            @NotNull OffsetDateTime endTime
+    ) {}
 }
 
