@@ -34,6 +34,10 @@ app:
     client-id: ${NAVER_CLIENT_ID}
     client-secret: ${NAVER_CLIENT_SECRET}
 
+  ranking-snapshot:
+    schedule-enabled: ${RANKING_SNAPSHOT_SCHEDULE_ENABLED:false}
+    cron: "${RANKING_SNAPSHOT_CRON:0 10 21 * * MON-FRI}"
+
 spring:
   config:
     import: "optional:file:./.env[.properties]"
