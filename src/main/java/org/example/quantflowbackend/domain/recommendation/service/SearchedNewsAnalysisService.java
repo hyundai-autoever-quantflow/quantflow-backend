@@ -16,6 +16,7 @@ import org.example.quantflowbackend.domain.recommendation.dto.SearchedStockRecom
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -65,6 +66,18 @@ public class SearchedNewsAnalysisService {
                 newsAnalysisService.recommend(search.news(), candidates),
                 search.news()
         );
+    }
+
+    public RecommendationDraft generateCategoryRecommendation(
+            LocalDate rankingDate, SearchedNewsAnalysisRequest request, String categoryCode
+    ) {
+        var candidates = rankingStockCandidateService.load(rankingDate, categoryCode);
+        if (candidates.isEmpty()) {
+            return new RecommendationDraft(new AiStockRecommendation(Optional.empty(),
+                    "선택한 카테고리에 거래량과 순매수 조건을 충족하는 종목이 없습니다.", List.of()), List.of());
+        }
+        var news = preparedNews(request).news();
+        return new RecommendationDraft(newsAnalysisService.recommend(news, candidates), news);
     }
 
     private AutoBuyStatus checkAutoBuyStatus(Long memberId, StockPick pick) {

@@ -52,6 +52,13 @@ public class RankingStockCandidateService {
             TossRankingResponse volume,
             TossInvestorRankingResponse investor
     ) {
+        return select(rankingDate, volume, investor, null);
+    }
+
+    private List<RankedStockCandidate> select(
+            LocalDate rankingDate, TossRankingResponse volume,
+            TossInvestorRankingResponse investor, String categoryCode
+    ) {
         validateRankingDates(rankingDate, volume, investor);
 
         var foreign = bySymbol(investor.foreigner().netBuyRankings());
@@ -90,6 +97,9 @@ public class RankingStockCandidateService {
             }
 
             Stock stock = matches.get(0);
+            if (categoryCode != null && !stock.getCategoryCodes().contains(categoryCode)) {
+                continue;
+            }
             candidates.add(new RankedStockCandidate(
                     stock.getStockId(),
                     stock.getMarket(),
@@ -141,6 +151,10 @@ public class RankingStockCandidateService {
     }
 
     public List<RankedStockCandidate> load(LocalDate rankingDate) {
+        return load(rankingDate, null);
+    }
+
+    public List<RankedStockCandidate> load(LocalDate rankingDate, String categoryCode) {
         if (rankingDate == null || !rankingDate.isBefore(LocalDate.now(SEOUL))) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST, "오늘보다 이전인 랭킹 기준일을 입력해주세요."
@@ -152,7 +166,7 @@ public class RankingStockCandidateService {
                         HttpStatus.SERVICE_UNAVAILABLE,
                         rankingDate + "에 저장된 랭킹이 없습니다."
                 ));
-        return select(rankingDate, snapshot.volume(), snapshot.investor());
+        return select(rankingDate, snapshot.volume(), snapshot.investor(), categoryCode);
     }
 
     private void validateRankingDates(
