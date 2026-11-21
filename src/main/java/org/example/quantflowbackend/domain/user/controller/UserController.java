@@ -8,10 +8,17 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.example.quantflowbackend.domain.user.domain.SocialProvider;
 import org.example.quantflowbackend.domain.user.domain.User;
 import org.example.quantflowbackend.domain.user.repository.UserRepository;
+import org.example.quantflowbackend.domain.user.service.UserPreferenceService;
+import org.example.quantflowbackend.domain.user.service.UserPreferenceService.Preferences;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -28,6 +35,7 @@ import java.util.List;
 @SecurityRequirement(name = "bearerAuth")
 public class UserController {
     private final UserRepository userRepository;
+    private final UserPreferenceService preferences;
 
     @GetMapping("/me")
     @Transactional(readOnly = true)
@@ -44,12 +52,7 @@ public class UserController {
                     content = @Content)
     })
     public UserResponse me(@Parameter(hidden = true) @AuthenticationPrincipal Jwt jwt) {
-        Long userId;
-        try {
-            userId = Long.valueOf(jwt.getSubject());
-        } catch (NumberFormatException exception) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
-        }
+        Long userId = userId(jwt);
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
         return new UserResponse(
@@ -57,6 +60,35 @@ public class UserController {
                 user.getEmail(), user.getName(), List.copyOf(user.getPreferredCategories())
         );
     }
+
+    @GetMapping("/me/preferred-categories")
+    @Operation(summary = "내 관심 카테고리 조회")
+    public Preferences preferences(@Parameter(hidden = true) @AuthenticationPrincipal Jwt jwt) {
+        return preferences.get(userId(jwt));
+    }
+
+    @PutMapping("/me/preferred-categories")
+    @Operation(summary = "내 관심 카테고리 변경",
+            description = "목록을 교체합니다. 빈 배열은 전체 선택 해제이며, 조회한 preferencesVersion을 함께 전달합니다.")
+    public Preferences replacePreferences(
+            @Parameter(hidden = true) @AuthenticationPrincipal Jwt jwt,
+            @Valid @RequestBody PreferenceRequest request
+    ) {
+        return preferences.replace(userId(jwt), request.preferencesVersion(), request.preferredCategories());
+    }
+
+    private Long userId(Jwt jwt) {
+        try {
+            return Long.valueOf(jwt.getSubject());
+        } catch (NumberFormatException exception) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+        }
+    }
+
+    public record PreferenceRequest(
+            @NotNull List<@NotBlank @Size(max = 40) String> preferredCategories,
+            @NotNull @PositiveOrZero Integer preferencesVersion
+    ) {}
 
     @Schema(description = "로그인한 회원의 정보")
     public record UserResponse(
