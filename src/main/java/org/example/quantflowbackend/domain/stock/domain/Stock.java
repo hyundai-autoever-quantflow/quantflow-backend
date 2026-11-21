@@ -5,6 +5,7 @@ import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.DynamicUpdate;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.type.SqlTypes;
@@ -18,6 +19,7 @@ import java.util.Objects;
 
 @Getter
 @Entity
+@DynamicUpdate
 @Table(
         name = "stocks",
         uniqueConstraints = {
