@@ -25,7 +25,11 @@ public class TradingSettingsController {
 
     @PostMapping
     @Operation(summary = "자동매수 설정 등록",
-            description = "사용자의 새 매수 설정을 저장합니다. 자동매수는 계좌의 켜기 API에서 활성화합니다.")
+            description = """
+                    새 매수 설정을 저장합니다. 매수 예산과 일일 최대 매수 횟수는 필수입니다.
+                    일일 손실 한도를 설정하면 최신 계좌 전체 손익을 확인할 때만 주문합니다.
+                    자동매수는 계좌의 켜기 API에서 활성화합니다.
+                    """)
     public ResponseEntity<SettingsResponse> register(
             @Parameter(hidden = true) @AuthenticationPrincipal Jwt jwt,
             @PathVariable("connectionId") Long connectionId,

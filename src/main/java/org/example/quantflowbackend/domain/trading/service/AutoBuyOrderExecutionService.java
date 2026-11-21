@@ -146,7 +146,9 @@ public class AutoBuyOrderExecutionService {
                 order.getQuantity(), order.getLimitPrice());
         order.beginSubmission();
         recordEvent(order, "submit", OrderEventType.SUBMIT, OrderStatus.CREATED, Map.of());
-        risk.recordBuyAttempt();
+        if (risk != null) {
+            risk.recordBuyAttempt();
+        }
         return request;
     }
 

@@ -1,5 +1,6 @@
 package org.example.quantflowbackend.domain.automation.service;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.RequiredArgsConstructor;
 import org.example.quantflowbackend.domain.automation.domain.TradingSettings;
 import org.example.quantflowbackend.domain.automation.domain.TradingSettingsStatus;
@@ -144,11 +145,12 @@ public class TradingSettingsService {
     }
 
     private String hash(Long connectionId, CreateTradingSettingsRequest request) {
+        var lossLimit = request.dailyLossLimitKrw();
         String input = String.join("|",
                 connectionId.toString(),
                 request.entryBudgetKrw().stripTrailingZeros().toPlainString(),
                 request.maxBuysPerDay().stripTrailingZeros().toPlainString(),
-                request.dailyLossLimitKrw().stripTrailingZeros().toPlainString()
+                lossLimit == null ? "unset" : lossLimit.stripTrailingZeros().toPlainString()
         );
 
         try {
@@ -167,6 +169,7 @@ public class TradingSettingsService {
             LocalDate effectiveTradingDate,
             BigDecimal entryBudgetKrw,
             Short maxBuysPerDay,
+            @Schema(description = "일일 계좌 손실 한도(원). null이면 매수 예산과 횟수를 적용합니다.", nullable = true)
             BigDecimal dailyLossLimitKrw
     ) {
         static SettingsResponse from(TradingSettings settings) {

@@ -30,6 +30,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -54,7 +55,9 @@ public class AutoBuyOrderPreparationService {
         var context = contexts.load(memberId, connectionId);
         var session = market.findRegularSession(context.tradingDate())
                 .orElseThrow(() -> conflict("정규장이 운영되지 않는 거래일입니다."));
-        risks.refreshIfAvailable(memberId, connectionId, context.tradingDate());
+        if (context.settings().dailyLossLimitKrw() != null) {
+            risks.refreshIfAvailable(memberId, connectionId, context.tradingDate());
+        }
         var stock = context.stock();
         BigDecimal commissionRate = accountQueries.read(memberId, connectionId,
                 (token, accountSeq) -> tossOrders.domesticBuyCommission(
@@ -85,7 +88,6 @@ public class AutoBuyOrderPreparationService {
             throw conflict("계좌 상태 또는 자동매수 설정이 변경되었습니다.");
         }
         var checkedRisk = risks.lockAndValidate(connectionId, date, settings);
-        var risk = checkedRisk.state();
         if (orders.existsByConnectionConnectionIdAndRecommendationTradingDateAndSideAndTriggerType(
                 connectionId, date, OrderSide.BUY, OrderTriggerType.ENTRY_RULE)) {
             throw conflict("이 계좌의 오늘 자동매수 주문이 이미 존재합니다.");
@@ -115,20 +117,26 @@ public class AutoBuyOrderPreparationService {
 
         LocalDateTime expiresAt = Collections.min(List.of(
                 LocalDateTime.ofInstant(session.endsAt(), SEOUL),
-                LocalDateTime.ofInstant(quoteTime.plus(MAX_QUOTE_AGE), SEOUL),
-                checkedRisk.validUntil()
+                LocalDateTime.ofInstant(quoteTime.plus(MAX_QUOTE_AGE), SEOUL)
         ));
-        var decision = Map.<String, Object>of(
+        var decision = new HashMap<>(Map.<String, Object>of(
                 "cashBuyingPowerKrw", context.availableCashKrw(),
                 "usableBudgetKrw", budget,
                 "grossOrderAmountKrw", limitPrice.multiply(quantity),
                 "estimatedCommissionKrw", limitPrice.multiply(quantity).multiply(commissionRate)
                         .setScale(0, RoundingMode.CEILING),
                 "quoteTime", quoteTime.toString(),
-                "dailyPnlKrw", risk.getDailyPnlKrw(),
-                "buyCount", risk.getBuyCount(),
-                "riskAsOf", risk.getAsOf().toString()
-        );
+                "buyCount", checkedRisk.submittedBuys(),
+                "dailyLossLimitApplied", checkedRisk.state() != null
+        ));
+        if (checkedRisk.state() != null) {
+            var risk = checkedRisk.state();
+            if (checkedRisk.validUntil().isBefore(expiresAt)) {
+                expiresAt = checkedRisk.validUntil();
+            }
+            decision.put("dailyPnlKrw", risk.getDailyPnlKrw());
+            decision.put("riskAsOf", risk.getAsOf().toString());
+        }
         String clientOrderKey = "ab-" + date + "-" + connectionId;
         var order = Order.createAutoBuy(date, context.stock(), clientOrderKey, quantity, limitPrice,
                 decision, user, connection, settings, limitPrice, expiresAt);
