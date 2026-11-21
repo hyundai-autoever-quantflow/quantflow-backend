@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.example.quantflowbackend.domain.automation.domain.AutomationDesiredState;
 import org.example.quantflowbackend.domain.automation.domain.TradingSettingsStatus;
 import org.example.quantflowbackend.domain.automation.repository.AutomationRepository;
+import org.example.quantflowbackend.domain.automation.service.DailyRiskStateService;
 import org.example.quantflowbackend.domain.broker.client.TossOrderClient;
 import org.example.quantflowbackend.domain.broker.client.TossOrderClient.BuyRequest;
 import org.example.quantflowbackend.domain.broker.client.TossOrderClient.OrderDetails;
@@ -45,6 +46,7 @@ public class AutoBuyOrderExecutionService {
     private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
 
     private final AutoBuyOrderPreparationService preparation;
+    private final DailyRiskStateService risks;
     private final BrokerAccountAccessService accountAccess;
     private final TossTokenService tokens;
     private final TossAccountQueryService accountQueries;
@@ -131,7 +133,7 @@ public class AutoBuyOrderExecutionService {
             throw conflict("계좌 상태 또는 자동매수 설정이 변경되었습니다.");
         }
 
-        preparation.lockAndValidateRisk(connectionId, order.getRecommendationTradingDate(), settings);
+        var risk = risks.lockAndValidate(connectionId, order.getRecommendationTradingDate(), settings).state();
         LocalDateTime now = now();
         if (!now.toLocalDate().equals(order.getRecommendationTradingDate()) || !now.isBefore(order.getExpiresAt())) {
             throw conflict("시세 또는 손익의 유효 시간이 지나 주문을 전송할 수 없습니다.");
@@ -144,6 +146,7 @@ public class AutoBuyOrderExecutionService {
                 order.getQuantity(), order.getLimitPrice());
         order.beginSubmission();
         recordEvent(order, "submit", OrderEventType.SUBMIT, OrderStatus.CREATED, Map.of());
+        risk.recordBuyAttempt();
         return request;
     }
 

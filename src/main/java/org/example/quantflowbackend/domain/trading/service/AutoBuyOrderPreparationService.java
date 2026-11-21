@@ -2,11 +2,9 @@ package org.example.quantflowbackend.domain.trading.service;
 
 import lombok.RequiredArgsConstructor;
 import org.example.quantflowbackend.domain.automation.domain.AutomationDesiredState;
-import org.example.quantflowbackend.domain.automation.domain.DailyRiskState;
-import org.example.quantflowbackend.domain.automation.domain.TradingSettings;
 import org.example.quantflowbackend.domain.automation.domain.TradingSettingsStatus;
 import org.example.quantflowbackend.domain.automation.repository.AutomationRepository;
-import org.example.quantflowbackend.domain.automation.repository.DailyRiskStateRepository;
+import org.example.quantflowbackend.domain.automation.service.DailyRiskStateService;
 import org.example.quantflowbackend.domain.broker.client.TossOrderClient;
 import org.example.quantflowbackend.domain.broker.domain.BrokerConnectionStatus;
 import org.example.quantflowbackend.domain.broker.domain.BrokerType;
@@ -41,13 +39,12 @@ import java.util.Map;
 public class AutoBuyOrderPreparationService {
     private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
     private static final Duration MAX_QUOTE_AGE = Duration.ofSeconds(30);
-    private static final Duration MAX_RISK_AGE = Duration.ofMinutes(1);
 
     private final BuyOrderContextService contexts;
     private final RankingStockCandidateService market;
     private final UserRepository users;
     private final AutomationRepository automations;
-    private final DailyRiskStateRepository risks;
+    private final DailyRiskStateService risks;
     private final OrderRepository orders;
     private final PlatformTransactionManager transactionManager;
     private final Clock clock;
@@ -57,6 +54,7 @@ public class AutoBuyOrderPreparationService {
     public Long prepare(Long memberId, Long connectionId) {
         var context = contexts.load(memberId, connectionId);
         var session = regularSession(context.tradingDate());
+        risks.refreshIfAvailable(memberId, connectionId, context.tradingDate());
         var stock = context.stock();
         BigDecimal commissionRate = accountQueries.read(memberId, connectionId,
                 (token, accountSeq) -> tossOrders.domesticBuyCommission(
@@ -105,12 +103,13 @@ public class AutoBuyOrderPreparationService {
                 || settings.getEffectiveTradingDate().isAfter(date)) {
             throw conflict("계좌 상태 또는 자동매수 설정이 변경되었습니다.");
         }
+        var checkedRisk = risks.lockAndValidate(connectionId, date, settings);
+        var risk = checkedRisk.state();
         if (orders.existsByConnectionConnectionIdAndRecommendationTradingDateAndSideAndTriggerType(
                 connectionId, date, OrderSide.BUY, OrderTriggerType.ENTRY_RULE)) {
             throw conflict("이 계좌의 오늘 자동매수 주문이 이미 존재합니다.");
         }
 
-        var risk = lockAndValidateRisk(connectionId, date, settings);
         var now = clock.instant();
         if (now.isBefore(session.startTime().toInstant()) || !now.isBefore(session.endTime().toInstant())) {
             throw conflict("정규장 거래 시간에만 자동매수 주문을 준비할 수 있습니다.");
@@ -136,7 +135,7 @@ public class AutoBuyOrderPreparationService {
         LocalDateTime expiresAt = Collections.min(List.of(
                 LocalDateTime.ofInstant(session.endTime().toInstant(), SEOUL),
                 LocalDateTime.ofInstant(quoteTime.plus(MAX_QUOTE_AGE), SEOUL),
-                risk.getAsOf().plus(MAX_RISK_AGE)
+                checkedRisk.validUntil()
         ));
         var decision = Map.<String, Object>of(
                 "cashBuyingPowerKrw", context.availableCashKrw(),
@@ -153,27 +152,6 @@ public class AutoBuyOrderPreparationService {
         var order = Order.createAutoBuy(date, context.stock(), clientOrderKey, quantity, limitPrice,
                 decision, user, connection, settings, limitPrice, expiresAt);
         return orders.saveAndFlush(order).getOrderId();
-    }
-
-    DailyRiskState lockAndValidateRisk(Long connectionId, LocalDate date, TradingSettings settings) {
-        var risk = risks.findByConnectionConnectionIdAndTradingDate(connectionId, date)
-                .orElseThrow(() -> conflict("오늘의 계좌 손익을 확인할 수 없습니다."));
-        var seoulNow = LocalDateTime.ofInstant(clock.instant(), SEOUL);
-        LocalDateTime riskExpiresAt = risk.getAsOf().plus(MAX_RISK_AGE);
-        if (!settings.getSettingsId().equals(risk.getSettings().getSettingsId())
-                || risk.getDailyPnlKrw() == null || risk.getAsOf().isAfter(seoulNow)
-                || !seoulNow.isBefore(riskExpiresAt)) {
-            throw conflict("현재 설정에 적용할 최신 계좌 손익을 확인할 수 없습니다.");
-        }
-        if (risk.isHardStopActive()
-                || risk.getDailyPnlKrw().compareTo(settings.getDailyLossLimitKrw().negate()) <= 0) {
-            throw conflict("일일 손실 한도 또는 계좌 중지 설정으로 주문을 보류합니다.");
-        }
-        if (risk.getBuyCount() >= settings.getMaxBuysPerDay()) {
-            throw conflict("일일 최대 매수 횟수에 도달했습니다.");
-        }
-
-        return risk;
     }
 
     private ResponseStatusException marketUnavailable() {
