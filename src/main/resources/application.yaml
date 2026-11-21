@@ -43,6 +43,10 @@ app:
     cron: "${DAILY_RECOMMENDATION_CRON:0 30 7 * * MON-FRI}"
     query: "${DAILY_RECOMMENDATION_QUERY:증시}"
 
+  auto-buy:
+    schedule-enabled: ${AUTO_BUY_SCHEDULE_ENABLED:false}
+    cron: "${AUTO_BUY_CRON:0 * 8-16 * * *}"
+
 spring:
   config:
     import: "optional:file:./.env[.properties]"
