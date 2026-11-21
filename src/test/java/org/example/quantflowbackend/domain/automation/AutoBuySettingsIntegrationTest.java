@@ -98,6 +98,10 @@ class AutoBuySettingsIntegrationTest {
             {"entryBudgetKrw":100000,"maxBuysPerDay":1,"dailyLossLimitKrw":10000}
             """;
 
+    private static final String BUDGET_AND_COUNT_SETTINGS = """
+            {"entryBudgetKrw":100000,"maxBuysPerDay":1}
+            """;
+
     @Autowired MockMvc mvc;
     @Autowired UserRepository users;
     @Autowired BrokerConnectionRepository connections;
@@ -271,10 +275,18 @@ class AutoBuySettingsIntegrationTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"ACCEPTED, ACCEPTED", "REJECTED, REJECTED", "UNKNOWN, UNKNOWN"})
-    void submitsOnlyOnceAndReconcilesKnownBrokerOrders(SubmissionOutcome outcome, OrderStatus expected) throws Exception {
-        var fixture = setupOrderPreparation(LocalTime.of(10, 0), 5, 70_000);
-        stubRisk(fixture, 5, 0);
+    @CsvSource({
+            "ACCEPTED, ACCEPTED, true", "REJECTED, REJECTED, true", "UNKNOWN, UNKNOWN, true",
+            "ACCEPTED, ACCEPTED, false", "UNKNOWN, UNKNOWN, false"
+    })
+    void submitsOnlyOnceAndReconcilesKnownBrokerOrders(
+            SubmissionOutcome outcome, OrderStatus expected, boolean lossLimitEnabled
+    ) throws Exception {
+        var fixture = setupOrderPreparation(LocalTime.of(10, 0), 5, 70_000,
+                lossLimitEnabled ? SETTINGS_BODY : BUDGET_AND_COUNT_SETTINGS);
+        if (lossLimitEnabled) {
+            stubRisk(fixture, 5, 0);
+        }
         var account = fixture.account();
         Long memberId = memberId(account);
         Long connectionId = account.getConnectionId();
@@ -282,7 +294,10 @@ class AutoBuySettingsIntegrationTest {
         when(tossOrders.submit(eq("fixture-token"), eq(42L), any())).thenAnswer(invocation -> {
             assertThat(jdbc.sql("SELECT status FROM orders WHERE connection_id = :connection")
                     .param("connection", connectionId).query(String.class).single()).isEqualTo("SUBMITTING");
-            assertThat(riskBuyCount(connectionId)).isEqualTo(1);
+            if (lossLimitEnabled) {
+                assertThat(riskBuyCount(connectionId)).isEqualTo(1);
+            }
+            assertThat(countAttempts(connectionId, fixture.now().toLocalDate())).isEqualTo(1);
             assertThat(org.springframework.transaction.support.TransactionSynchronizationManager
                     .isActualTransactionActive()).isFalse();
             return switch (outcome) {
@@ -299,13 +314,28 @@ class AutoBuySettingsIntegrationTest {
             scheduler.run();
             var order = orderExecution.getToday(memberId, connectionId);
             assertThat(order.status()).isEqualTo(expected);
-            assertThat(riskBuyCount(connectionId)).isEqualTo(1);
+            if (lossLimitEnabled) {
+                assertThat(riskBuyCount(connectionId)).isEqualTo(1);
+            }
+            assertThat(countAttempts(connectionId, fixture.now().toLocalDate())).isEqualTo(1);
             assertThatThrownBy(() -> orderExecution.submitPrepared(memberId, connectionId, order.orderId()))
                     .isInstanceOf(ResponseStatusException.class)
                     .hasMessageContaining("이미 전송을 시도했습니다");
             scheduler.run();
             assertThat(orderExecution.getToday(memberId, connectionId).orderId()).isEqualTo(order.orderId());
             verify(tossOrders, times(1)).submit(eq("fixture-token"), eq(42L), any());
+            if (!lossLimitEnabled) {
+                verifyNoInteractions(riskSource);
+                assertThat(jdbc.sql("SELECT count(*) FROM daily_risk_states WHERE connection_id = :connectionId")
+                        .param("connectionId", connectionId).query(Long.class).single()).isZero();
+                assertThat(orders.findById(order.orderId()).orElseThrow().getDecisionSnapshot())
+                        .containsEntry("dailyLossLimitApplied", false)
+                        .doesNotContainKeys("dailyPnlKrw", "riskAsOf");
+                assertThatThrownBy(() -> orderPreparation.prepare(memberId, connectionId))
+                        .isInstanceOf(ResponseStatusException.class)
+                        .hasMessageContaining("일일 최대 매수 횟수에 도달했습니다");
+                verifyNoInteractions(riskSource);
+            }
             mvc.perform(get(AUTOMATION + "/orders/today", connectionId)
                             .with(jwt().jwt(token -> token.subject(memberId.toString()))))
                     .andExpect(status().isOk())
@@ -340,6 +370,40 @@ class AutoBuySettingsIntegrationTest {
             TestTransaction.flagForCommit();
             TestTransaction.end();
         }
+    }
+
+    @Test
+    void budgetOnlySettingsTakeEffectAfterExplicitActivation() throws Exception {
+        var fixture = setupOrderPreparation(LocalTime.of(10, 0), 5, 70_000);
+        var account = fixture.account();
+        String key = "budget-and-count-only";
+        var saved = createSettings(account, key, BUDGET_AND_COUNT_SETTINGS)
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.dailyLossLimitKrw").doesNotExist())
+                .andReturn();
+        String settingsId = json.readTree(saved.getResponse().getContentAsString()).get("settingsId").asText();
+
+        createSettings(account, key, """
+                        {"entryBudgetKrw":100000,"maxBuysPerDay":1,"dailyLossLimitKrw":null}
+                        """)
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.settingsId").value(Long.parseLong(settingsId)));
+        createSettings(account, key, SETTINGS_BODY).andExpect(status().isConflict());
+        createSettings(account, "zero-loss-limit", """
+                        {"entryBudgetKrw":100000,"maxBuysPerDay":1,"dailyLossLimitKrw":0}
+                        """).andExpect(status().isBadRequest());
+
+        mvc.perform(get(AUTOMATION, account.getConnectionId())
+                        .with(jwt().jwt(token -> token.subject(memberId(account).toString()))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.settingsId").value(fixture.settingsId()))
+                .andExpect(jsonPath("$.settings.dailyLossLimitKrw").value(10_000));
+
+        enable(account, settingsId)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.settings.dailyLossLimitKrw").doesNotExist());
+        orderPreparation.prepare(memberId(account), account.getConnectionId());
+        verifyNoInteractions(riskSource);
     }
 
     @Test
@@ -501,6 +565,11 @@ class AutoBuySettingsIntegrationTest {
     }
 
     private PreparationFixture setupOrderPreparation(LocalTime time, long quoteAge, long cash) throws Exception {
+        return setupOrderPreparation(time, quoteAge, cash, SETTINGS_BODY);
+    }
+
+    private PreparationFixture setupOrderPreparation(LocalTime time, long quoteAge, long cash, String settings)
+            throws Exception {
         var account = createAccount();
         var today = LocalDate.now(SEOUL);
         var now = today.atTime(time).atZone(SEOUL).toOffsetDateTime();
@@ -514,7 +583,7 @@ class AutoBuySettingsIntegrationTest {
                 new MarketDay(today, open), new MarketDay(today.minusDays(1), open), null
         ));
 
-        var saved = createSettings(account, "prepare", SETTINGS_BODY)
+        var saved = createSettings(account, "prepare", settings)
                 .andExpect(status().isCreated()).andReturn();
         long settingsId = json.readTree(saved.getResponse().getContentAsString()).get("settingsId").asLong();
         enable(account, Long.toString(settingsId)).andExpect(status().isOk());

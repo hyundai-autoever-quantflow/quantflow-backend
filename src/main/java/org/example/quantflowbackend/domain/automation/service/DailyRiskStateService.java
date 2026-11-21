@@ -75,6 +75,9 @@ public class DailyRiskStateService {
         var automation = automations.findByConnectionConnectionIdAndUserMemberId(connectionId, memberId)
                 .orElseThrow(() -> conflict("계좌의 자동매수 설정을 찾을 수 없습니다."));
         var settings = automation.getSettings();
+        if (settings.getDailyLossLimitKrw() == null) {
+            return;
+        }
         var state = states.findByConnectionConnectionIdAndTradingDate(connectionId, date)
                 .orElseGet(() -> DailyRiskState.create(user, automation.getConnection(), date, settings,
                         snapshot.startingEquityKrw(), settings.getDailyLossLimitKrw(), date.atStartOfDay(), asOf));
@@ -86,15 +89,8 @@ public class DailyRiskStateService {
 
     @Transactional(propagation = Propagation.MANDATORY)
     public CheckedRisk lockAndValidate(Long connectionId, LocalDate date, TradingSettings settings) {
-        var risk = states.findByConnectionConnectionIdAndTradingDate(connectionId, date)
-                .orElseThrow(() -> conflict("오늘의 계좌 손익을 확인할 수 없습니다."));
-        var now = LocalDateTime.ofInstant(clock.instant(), SEOUL);
-        var validUntil = risk.getAsOf().plus(MAX_RISK_AGE);
-        if (risk.getDailyPnlKrw() == null || !date.equals(risk.getAsOf().toLocalDate())
-                || risk.getAsOf().isAfter(now) || !now.isBefore(validUntil)) {
-            throw conflict("최신 계좌 손익을 확인할 수 없습니다.");
-        }
-        if (risk.isHardStopActive() || risk.getDailyPnlKrw().compareTo(settings.getDailyLossLimitKrw().negate()) <= 0) {
+        var riskState = states.findByConnectionConnectionIdAndTradingDate(connectionId, date);
+        if (riskState.filter(DailyRiskState::isHardStopActive).isPresent()) {
             throw conflict("일일 손실 한도 또는 계좌 중지 설정으로 주문을 보류합니다.");
         }
 
@@ -102,8 +98,24 @@ public class DailyRiskStateService {
         if (submitted >= settings.getMaxBuysPerDay()) {
             throw conflict("일일 최대 매수 횟수에 도달했습니다.");
         }
+        var lossLimit = settings.getDailyLossLimitKrw();
+        if (lossLimit == null) {
+            return new CheckedRisk(submitted, null, null);
+        }
+
+        var risk = riskState.orElseThrow(() -> conflict("오늘의 계좌 손익을 확인할 수 없습니다."));
+        var now = LocalDateTime.ofInstant(clock.instant(), SEOUL);
+        var validUntil = risk.getAsOf().plus(MAX_RISK_AGE);
+        if (risk.getDailyPnlKrw() == null || !date.equals(risk.getAsOf().toLocalDate())
+                || risk.getAsOf().isAfter(now) || !now.isBefore(validUntil)) {
+            throw conflict("최신 계좌 손익을 확인할 수 없습니다.");
+        }
+        if (risk.getDailyPnlKrw().compareTo(lossLimit.negate()) <= 0) {
+            throw conflict("일일 손실 한도 또는 계좌 중지 설정으로 주문을 보류합니다.");
+        }
+
         risk.applySettingsAndBuyCount(settings, submitted);
-        return new CheckedRisk(risk, validUntil);
+        return new CheckedRisk(submitted, risk, validUntil);
     }
 
     private int countSubmittedBuys(Long connectionId, LocalDate date) {
@@ -127,5 +139,5 @@ public class DailyRiskStateService {
         return new ResponseStatusException(HttpStatus.CONFLICT, message);
     }
 
-    public record CheckedRisk(DailyRiskState state, LocalDateTime validUntil) {}
+    public record CheckedRisk(int submittedBuys, DailyRiskState state, LocalDateTime validUntil) {}
 }

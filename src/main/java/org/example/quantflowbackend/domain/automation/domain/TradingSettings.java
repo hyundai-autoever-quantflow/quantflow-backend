@@ -72,7 +72,7 @@ public class TradingSettings extends BaseCreatedTimeEntity {
     @Column(name = "max_holding_minutes")
     private Integer maxHoldingMinutes;
 
-    @Column(name = "daily_loss_limit_krw", nullable = false, precision = 20, scale = 0)
+    @Column(name = "daily_loss_limit_krw", precision = 20, scale = 0)
     private BigDecimal dailyLossLimitKrw;
 
     @JdbcTypeCode(SqlTypes.JSON)
@@ -115,7 +115,7 @@ public class TradingSettings extends BaseCreatedTimeEntity {
         this.takeProfitPct = takeProfitPct;
         this.stopLossPct = stopLossPct;
         this.maxHoldingMinutes = maxHoldingMinutes;
-        this.dailyLossLimitKrw = Objects.requireNonNull(dailyLossLimitKrw, "필수 값입니다: dailyLossLimitKrw");
+        this.dailyLossLimitKrw = dailyLossLimitKrw;
         this.riskLimits = new HashMap<>(Objects.requireNonNull(riskLimits, "필수 값입니다: riskLimits"));
         this.strategyVersion = Objects.requireNonNull(strategyVersion, "필수 값입니다: strategyVersion");
         this.requestKey = Objects.requireNonNull(requestKey, "필수 값입니다: requestKey");
