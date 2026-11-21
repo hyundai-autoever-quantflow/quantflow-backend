@@ -1,5 +1,8 @@
 package org.example.quantflowbackend.domain.automation;
 
+import org.example.quantflowbackend.domain.automation.service.DailyRiskSnapshotSource;
+import org.example.quantflowbackend.domain.automation.service.DailyRiskSnapshotSource.Snapshot;
+import org.example.quantflowbackend.domain.automation.service.DailyRiskStateService;
 import org.example.quantflowbackend.domain.broker.client.TossOrderClient;
 import org.example.quantflowbackend.domain.broker.client.TossOrderClient.FillDetails;
 import org.example.quantflowbackend.domain.broker.client.TossOrderClient.OrderDetails;
@@ -26,9 +29,13 @@ import org.example.quantflowbackend.domain.recommendation.dto.DailyRecommendatio
 import org.example.quantflowbackend.domain.recommendation.service.RankingStockCandidateService;
 import org.example.quantflowbackend.domain.stock.domain.Stock;
 import org.example.quantflowbackend.domain.stock.repository.StockRepository;
+import org.example.quantflowbackend.domain.trading.domain.OrderEvent;
+import org.example.quantflowbackend.domain.trading.domain.OrderEventType;
 import org.example.quantflowbackend.domain.trading.domain.OrderSide;
 import org.example.quantflowbackend.domain.trading.domain.OrderStatus;
+import org.example.quantflowbackend.domain.trading.domain.OrderTriggerType;
 import org.example.quantflowbackend.domain.trading.domain.OrderType;
+import org.example.quantflowbackend.domain.trading.repository.OrderEventRepository;
 import org.example.quantflowbackend.domain.trading.repository.OrderRepository;
 import org.example.quantflowbackend.domain.trading.service.AutoBuyOrderExecutionService;
 import org.example.quantflowbackend.domain.trading.service.AutoBuyOrderPreparationService;
@@ -55,10 +62,13 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -89,6 +99,8 @@ class AutoBuySettingsIntegrationTest {
     @Autowired StockRepository stocks;
     @Autowired JdbcClient jdbc;
     @Autowired OrderRepository orders;
+    @Autowired OrderEventRepository orderEvents;
+    @Autowired DailyRiskStateService dailyRisks;
     @Autowired AutoBuyOrderPreparationService orderPreparation;
     @Autowired AutoBuyOrderExecutionService orderExecution;
     @MockitoBean RankingStockCandidateService market;
@@ -97,6 +109,7 @@ class AutoBuySettingsIntegrationTest {
     @MockitoBean BrokerAccountAccessService accountAccess;
     @MockitoBean TossTokenService tossTokens;
     @MockitoBean TossOrderClient tossOrders;
+    @MockitoBean DailyRiskSnapshotSource riskSource;
 
     private final JsonMapper json = new JsonMapper();
 
@@ -203,7 +216,7 @@ class AutoBuySettingsIntegrationTest {
     @Test
     void preparesOneLimitOrderForTodayAndRejectsDuplicatePreparation() throws Exception {
         var fixture = setupOrderPreparation(LocalTime.of(10, 0), 5, 70_000);
-        seedRisk(fixture, 5, 0, 0);
+        stubRisk(fixture, 5, 0);
         var account = fixture.account();
 
         Long orderId = orderPreparation.prepare(memberId(account), account.getConnectionId());
@@ -227,20 +240,19 @@ class AutoBuySettingsIntegrationTest {
 
     @ParameterizedTest
     @CsvSource({
-            "16:00, 5, 5, 0, 0, 70000, 정규장 거래 시간",
-            "10:00, 31, 5, 0, 0, 70000, 정규장의 최신 시세",
-            "10:00, 5, 61, 0, 0, 70000, 최신 계좌 손익",
-            "10:00, 5, 5, , 0, 70000, 오늘의 계좌 손익",
-            "10:00, 5, 5, -10000, 0, 70000, 일일 손실 한도",
-            "10:00, 5, 5, 0, 1, 70000, 일일 최대 매수 횟수",
-            "10:00, 5, 5, 0, 0, 30000, 한 주를 주문할 수 없습니다"
+            "16:00, 5, 5, 0, 70000, 정규장 거래 시간",
+            "10:00, 31, 5, 0, 70000, 정규장의 최신 시세",
+            "10:00, 5, 60, 0, 70000, 최신 계좌 손익",
+            "10:00, 5, 5, , 70000, 오늘의 계좌 손익",
+            "10:00, 5, 5, -10000, 70000, 일일 손실 한도",
+            "10:00, 5, 5, 0, 30000, 한 주를 주문할 수 없습니다"
     })
     void keepsInvalidOrdersOutOfTheDatabase(
-            LocalTime time, long quoteAge, long riskAge, Long dailyPnl, int buyCount, long cash, String reason
+            LocalTime time, long quoteAge, long riskAge, Long dailyPnl, long cash, String reason
     ) throws Exception {
         var fixture = setupOrderPreparation(time, quoteAge, cash);
         if (dailyPnl != null) {
-            seedRisk(fixture, riskAge, dailyPnl, buyCount);
+            stubRisk(fixture, riskAge, dailyPnl);
         }
         var account = fixture.account();
 
@@ -254,7 +266,7 @@ class AutoBuySettingsIntegrationTest {
     @CsvSource({"ACCEPTED, ACCEPTED", "REJECTED, REJECTED", "UNKNOWN, UNKNOWN"})
     void submitsOnlyOnceAndReconcilesKnownBrokerOrders(SubmissionOutcome outcome, OrderStatus expected) throws Exception {
         var fixture = setupOrderPreparation(LocalTime.of(10, 0), 5, 70_000);
-        seedRisk(fixture, 5, 0, 0);
+        stubRisk(fixture, 5, 0);
         var account = fixture.account();
         Long memberId = memberId(account);
         Long connectionId = account.getConnectionId();
@@ -262,6 +274,7 @@ class AutoBuySettingsIntegrationTest {
         when(tossOrders.submit(eq("fixture-token"), eq(42L), any())).thenAnswer(invocation -> {
             assertThat(jdbc.sql("SELECT status FROM orders WHERE connection_id = :connection")
                     .param("connection", connectionId).query(String.class).single()).isEqualTo("SUBMITTING");
+            assertThat(riskBuyCount(connectionId)).isEqualTo(1);
             assertThat(org.springframework.transaction.support.TransactionSynchronizationManager
                     .isActualTransactionActive()).isFalse();
             return switch (outcome) {
@@ -276,6 +289,7 @@ class AutoBuySettingsIntegrationTest {
         try {
             var order = orderExecution.executeToday(memberId, connectionId);
             assertThat(order.status()).isEqualTo(expected);
+            assertThat(riskBuyCount(connectionId)).isEqualTo(1);
             assertThatThrownBy(() -> orderExecution.submitPrepared(memberId, connectionId, order.orderId()))
                     .isInstanceOf(ResponseStatusException.class)
                     .hasMessageContaining("이미 전송을 시도했습니다");
@@ -315,6 +329,89 @@ class AutoBuySettingsIntegrationTest {
             TestTransaction.flagForCommit();
             TestTransaction.end();
         }
+    }
+
+    @Test
+    void accountsForExternalCashFlowAndKeepsTheNewestMeasurement() throws Exception {
+        var fixture = setupOrderPreparation(LocalTime.of(10, 0), 5, 70_000);
+        var account = fixture.account();
+        var date = fixture.now().toLocalDate();
+        stubSnapshot(fixture, new Snapshot(BigDecimal.valueOf(100_000), BigDecimal.valueOf(108_000),
+                BigDecimal.valueOf(10_000), fixture.now().minusSeconds(5).toInstant()));
+
+        dailyRisks.refreshIfAvailable(memberId(account), account.getConnectionId(), date);
+        stubRisk(fixture, 10, 5_000);
+        dailyRisks.refreshIfAvailable(memberId(account), account.getConnectionId(), date);
+
+        Long orderId = orderPreparation.prepare(memberId(account), account.getConnectionId());
+        var order = orders.findById(orderId).orElseThrow();
+        assertThat(order.getDecisionSnapshot()).containsEntry("dailyPnlKrw", BigDecimal.valueOf(-2_000))
+                .containsEntry("riskAsOf", fixture.now().minusSeconds(5).toLocalDateTime().toString());
+        assertThat(jdbc.sql("SELECT baseline_at FROM daily_risk_states WHERE connection_id = :id")
+                .param("id", account.getConnectionId()).query(LocalDateTime.class).single())
+                .isEqualTo(date.atStartOfDay());
+    }
+
+    @Test
+    void countsDistinctSubmissionAttemptsOnlyForTheRequestedAccountAndTradingDate() throws Exception {
+        var fixture = setupOrderPreparation(LocalTime.of(10, 0), 5, 70_000);
+        stubRisk(fixture, 5, 0);
+        var account = fixture.account();
+        var secondAccount = createAccount();
+        var date = fixture.now().toLocalDate();
+        Long orderId = orderPreparation.prepare(memberId(account), account.getConnectionId());
+        var order = orders.findById(orderId).orElseThrow();
+        assertThat(riskBuyCount(account.getConnectionId())).isZero();
+
+        var now = fixture.now().toLocalDateTime();
+        orderEvents.saveAllAndFlush(List.of(
+                OrderEvent.create(order, "first-submit", OrderEventType.SUBMIT, OrderStatus.CREATED,
+                        OrderStatus.SUBMITTING, Map.of(), now, now),
+                OrderEvent.create(order, "duplicate-submit-event", OrderEventType.SUBMIT, OrderStatus.CREATED,
+                        OrderStatus.SUBMITTING, Map.of(), now, now)
+        ));
+
+        dailyRisks.refreshIfAvailable(memberId(account), account.getConnectionId(), date);
+        // JDBC does not automatically flush pending Hibernate updates.
+        orders.flush();
+        assertThat(riskBuyCount(account.getConnectionId())).isEqualTo(1);
+        assertThat(countAttempts(secondAccount.getConnectionId(), date)).isZero();
+        assertThat(countAttempts(account.getConnectionId(), date.minusDays(1))).isZero();
+
+        var nextDay = date.plusDays(1);
+        var nextObservation = nextDay.atStartOfDay(SEOUL).plusSeconds(10).toInstant();
+        when(clock.instant()).thenReturn(nextObservation);
+        when(riskSource.fetch(memberId(account), account.getConnectionId(), nextDay))
+                .thenReturn(Optional.of(new Snapshot(BigDecimal.valueOf(100_000), BigDecimal.valueOf(100_000),
+                        BigDecimal.ZERO, nextObservation)));
+        dailyRisks.refreshIfAvailable(memberId(account), account.getConnectionId(), nextDay);
+        assertThat(jdbc.sql("""
+                        SELECT buy_count FROM daily_risk_states
+                        WHERE connection_id = :connectionId ORDER BY trading_date
+                        """).param("connectionId", account.getConnectionId()).query(Integer.class).list())
+                .containsExactly(1, 0);
+
+        when(clock.instant()).thenReturn(fixture.now().toInstant());
+        assertThatThrownBy(() -> orderPreparation.prepare(memberId(account), account.getConnectionId()))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("일일 최대 매수 횟수에 도달했습니다");
+    }
+
+    @Test
+    void rejectsAnAccountSnapshotFromAnotherTradingDate() throws Exception {
+        var fixture = setupOrderPreparation(LocalTime.of(10, 0), 5, 70_000);
+        var account = fixture.account();
+        stubRisk(fixture, 86_400, 0);
+
+        assertThatThrownBy(() -> orderPreparation.prepare(memberId(account), account.getConnectionId()))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("계좌 전체 일일 손익 데이터의 기준");
+        assertThat(countOrders(account)).isZero();
+    }
+
+    private long countAttempts(Long connectionId, LocalDate date) {
+        return orderEvents.countDailyOrderAttempts(connectionId, date, OrderSide.BUY,
+                OrderTriggerType.ENTRY_RULE, OrderEventType.SUBMIT);
     }
 
     private void cleanupCommittedOrderFixture(PreparationFixture fixture) {
@@ -376,23 +473,19 @@ class AutoBuySettingsIntegrationTest {
         return new PreparationFixture(account, settingsId, now);
     }
 
-    private void seedRisk(PreparationFixture fixture, long riskAge, long dailyPnl, int buyCount) {
-        jdbc.sql("""
-                INSERT INTO daily_risk_states
-                    (user_id, connection_id, trading_date, settings_id, starting_equity_krw,
-                     daily_pnl_krw, daily_loss_limit_krw, buy_count, baseline_at, as_of)
-                VALUES (:userId, :connectionId, :date, :settingsId, 100000,
-                        :dailyPnl, 10000, :buyCount, :baseline, :asOf)
-                """)
-                .param("userId", memberId(fixture.account()))
-                .param("connectionId", fixture.account().getConnectionId())
-                .param("date", fixture.now().toLocalDate())
-                .param("settingsId", fixture.settingsId())
-                .param("dailyPnl", dailyPnl)
-                .param("buyCount", buyCount)
-                .param("baseline", fixture.now().toLocalDate().atTime(8, 0))
-                .param("asOf", fixture.now().minusSeconds(riskAge).toLocalDateTime())
-                .update();
+    private void stubRisk(PreparationFixture fixture, long riskAge, long dailyPnl) {
+        stubSnapshot(fixture, new Snapshot(BigDecimal.valueOf(100_000), BigDecimal.valueOf(100_000 + dailyPnl),
+                BigDecimal.ZERO, fixture.now().minusSeconds(riskAge).toInstant()));
+    }
+
+    private void stubSnapshot(PreparationFixture fixture, Snapshot snapshot) {
+        when(riskSource.fetch(memberId(fixture.account()), fixture.account().getConnectionId(),
+                fixture.now().toLocalDate())).thenReturn(Optional.of(snapshot));
+    }
+
+    private int riskBuyCount(Long connectionId) {
+        return jdbc.sql("SELECT buy_count FROM daily_risk_states WHERE connection_id = :connectionId")
+                .param("connectionId", connectionId).query(Integer.class).single();
     }
 
     private long countOrders(BrokerConnection account) {

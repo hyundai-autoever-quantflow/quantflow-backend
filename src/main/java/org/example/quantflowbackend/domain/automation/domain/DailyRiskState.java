@@ -125,4 +125,27 @@ public class DailyRiskState {
                 .asOf(asOf)
                 .build();
     }
+
+    public void applyEquitySnapshot(BigDecimal startingEquity, BigDecimal currentEquity, BigDecimal netExternalFlow,
+                                    BigDecimal dailyPnl, LocalDateTime observedAt) {
+        if (dailyPnlKrw != null && !observedAt.isAfter(asOf)) {
+            return;
+        }
+        startingEquityKrw = startingEquity;
+        currentEquityKrw = currentEquity;
+        netCashFlowKrw = netExternalFlow;
+        dailyPnlKrw = dailyPnl;
+        baselineAt = tradingDate.atStartOfDay();
+        asOf = observedAt;
+    }
+
+    public void applySettingsAndBuyCount(TradingSettings settings, int submittedBuys) {
+        this.settings = settings;
+        dailyLossLimitKrw = settings.getDailyLossLimitKrw();
+        buyCount = submittedBuys;
+    }
+
+    public void recordBuyAttempt() {
+        buyCount++;
+    }
 }
