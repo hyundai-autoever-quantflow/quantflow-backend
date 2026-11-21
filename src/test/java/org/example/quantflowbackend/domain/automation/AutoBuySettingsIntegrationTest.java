@@ -1,5 +1,7 @@
 package org.example.quantflowbackend.domain.automation;
 
+import org.example.quantflowbackend.domain.automation.repository.AutomationRepository;
+import org.example.quantflowbackend.domain.automation.scheduler.AutoBuyScheduler;
 import org.example.quantflowbackend.domain.automation.service.DailyRiskSnapshotSource;
 import org.example.quantflowbackend.domain.automation.service.DailyRiskSnapshotSource.Snapshot;
 import org.example.quantflowbackend.domain.automation.service.DailyRiskStateService;
@@ -26,6 +28,7 @@ import org.example.quantflowbackend.domain.broker.service.TossTokenService;
 import org.example.quantflowbackend.domain.recommendation.dto.AiStockRecommendation.Market;
 import org.example.quantflowbackend.domain.recommendation.dto.AiStockRecommendation.StockPick;
 import org.example.quantflowbackend.domain.recommendation.dto.DailyRecommendation;
+import org.example.quantflowbackend.domain.recommendation.service.DailyRecommendationService;
 import org.example.quantflowbackend.domain.recommendation.service.RankingStockCandidateService;
 import org.example.quantflowbackend.domain.stock.domain.Stock;
 import org.example.quantflowbackend.domain.stock.repository.StockRepository;
@@ -39,6 +42,7 @@ import org.example.quantflowbackend.domain.trading.repository.OrderEventReposito
 import org.example.quantflowbackend.domain.trading.repository.OrderRepository;
 import org.example.quantflowbackend.domain.trading.service.AutoBuyOrderExecutionService;
 import org.example.quantflowbackend.domain.trading.service.AutoBuyOrderPreparationService;
+import org.example.quantflowbackend.domain.trading.service.DomesticMarketSessionService;
 import org.example.quantflowbackend.domain.user.domain.SocialProvider;
 import org.example.quantflowbackend.domain.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
@@ -48,6 +52,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -103,6 +108,9 @@ class AutoBuySettingsIntegrationTest {
     @Autowired DailyRiskStateService dailyRisks;
     @Autowired AutoBuyOrderPreparationService orderPreparation;
     @Autowired AutoBuyOrderExecutionService orderExecution;
+    @Autowired AutomationRepository automations;
+    @Autowired DailyRecommendationService dailyRecommendations;
+    @Autowired DomesticMarketSessionService marketSessions;
     @MockitoBean RankingStockCandidateService market;
     @MockitoBean BrokerTradingQueryService tradingQueries;
     @MockitoBean Clock clock;
@@ -287,13 +295,16 @@ class AutoBuySettingsIntegrationTest {
         TestTransaction.end();
 
         try {
-            var order = orderExecution.executeToday(memberId, connectionId);
+            var scheduler = scheduler(orderExecution);
+            scheduler.run();
+            var order = orderExecution.getToday(memberId, connectionId);
             assertThat(order.status()).isEqualTo(expected);
             assertThat(riskBuyCount(connectionId)).isEqualTo(1);
             assertThatThrownBy(() -> orderExecution.submitPrepared(memberId, connectionId, order.orderId()))
                     .isInstanceOf(ResponseStatusException.class)
                     .hasMessageContaining("이미 전송을 시도했습니다");
-            assertThat(orderExecution.executeToday(memberId, connectionId).orderId()).isEqualTo(order.orderId());
+            scheduler.run();
+            assertThat(orderExecution.getToday(memberId, connectionId).orderId()).isEqualTo(order.orderId());
             verify(tossOrders, times(1)).submit(eq("fixture-token"), eq(42L), any());
             mvc.perform(get(AUTOMATION + "/orders/today", connectionId)
                             .with(jwt().jwt(token -> token.subject(memberId.toString()))))
@@ -329,6 +340,58 @@ class AutoBuySettingsIntegrationTest {
             TestTransaction.flagForCommit();
             TestTransaction.end();
         }
+    }
+
+    @Test
+    void runsOnlyDuringTheRegularMarketSession() throws Exception {
+        var fixture = setupOrderPreparation(LocalTime.of(8, 59), 5, 70_000);
+        var execution = mock(AutoBuyOrderExecutionService.class);
+        var scheduler = scheduler(execution);
+
+        scheduler.run();
+        when(clock.instant()).thenReturn(fixture.now().with(LocalTime.of(15, 30)).toInstant());
+        scheduler.run();
+
+        verifyNoInteractions(execution);
+    }
+
+    @Test
+    void keepsRunningAfterOneAccountIsBlockedAndSkipsDisabledAccounts() throws Exception {
+        var fixture = setupOrderPreparation(LocalTime.of(10, 0), 5, 70_000);
+        var first = fixture.account();
+        var next = createAccount();
+        var stopped = createAccount();
+        enableForScheduler(next);
+        enableForScheduler(stopped);
+        mvc.perform(post(AUTOMATION + "/stop", stopped.getConnectionId())
+                        .with(jwt().jwt(token -> token.subject(memberId(stopped).toString()))))
+                .andExpect(status().isOk());
+
+        var execution = mock(AutoBuyOrderExecutionService.class);
+        when(execution.executeToday(memberId(first), first.getConnectionId()))
+                .thenThrow(new ResponseStatusException(HttpStatus.CONFLICT, "오늘의 계좌 손익을 확인할 수 없습니다."));
+        when(execution.executeToday(memberId(next), next.getConnectionId()))
+                .thenReturn(new AutoBuyOrderExecutionService.OrderResult(
+                        99L, fixture.now().toLocalDate(), OrderStatus.ACCEPTED,
+                        BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.valueOf(30_000), "fixture-order", null));
+
+        scheduler(execution).run();
+
+        var inOrder = inOrder(execution);
+        inOrder.verify(execution).executeToday(memberId(first), first.getConnectionId());
+        inOrder.verify(execution).executeToday(memberId(next), next.getConnectionId());
+        inOrder.verifyNoMoreInteractions();
+    }
+
+    private AutoBuyScheduler scheduler(AutoBuyOrderExecutionService execution) {
+        return new AutoBuyScheduler(dailyRecommendations, marketSessions, automations, execution, clock);
+    }
+
+    private void enableForScheduler(BrokerConnection account) throws Exception {
+        var result = createSettings(account, "scheduler", SETTINGS_BODY)
+                .andExpect(status().isCreated()).andReturn();
+        String id = json.readTree(result.getResponse().getContentAsString()).get("settingsId").asText();
+        enable(account, id).andExpect(status().isOk());
     }
 
     @Test

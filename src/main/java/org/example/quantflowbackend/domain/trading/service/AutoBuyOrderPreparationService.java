@@ -8,14 +8,13 @@ import org.example.quantflowbackend.domain.automation.service.DailyRiskStateServ
 import org.example.quantflowbackend.domain.broker.client.TossOrderClient;
 import org.example.quantflowbackend.domain.broker.domain.BrokerConnectionStatus;
 import org.example.quantflowbackend.domain.broker.domain.BrokerType;
-import org.example.quantflowbackend.domain.broker.dto.TossMarketCalendarResponse.RegularSession;
 import org.example.quantflowbackend.domain.broker.service.TossAccountQueryService;
-import org.example.quantflowbackend.domain.recommendation.service.RankingStockCandidateService;
 import org.example.quantflowbackend.domain.trading.domain.Order;
 import org.example.quantflowbackend.domain.trading.domain.OrderSide;
 import org.example.quantflowbackend.domain.trading.domain.OrderTriggerType;
 import org.example.quantflowbackend.domain.trading.repository.OrderRepository;
 import org.example.quantflowbackend.domain.trading.service.BuyOrderContextService.BuyOrderContext;
+import org.example.quantflowbackend.domain.trading.service.DomesticMarketSessionService.RegularMarketSession;
 import org.example.quantflowbackend.domain.user.repository.UserRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -41,7 +40,7 @@ public class AutoBuyOrderPreparationService {
     private static final Duration MAX_QUOTE_AGE = Duration.ofSeconds(30);
 
     private final BuyOrderContextService contexts;
-    private final RankingStockCandidateService market;
+    private final DomesticMarketSessionService market;
     private final UserRepository users;
     private final AutomationRepository automations;
     private final DailyRiskStateService risks;
@@ -53,7 +52,8 @@ public class AutoBuyOrderPreparationService {
 
     public Long prepare(Long memberId, Long connectionId) {
         var context = contexts.load(memberId, connectionId);
-        var session = regularSession(context.tradingDate());
+        var session = market.findRegularSession(context.tradingDate())
+                .orElseThrow(() -> conflict("정규장이 운영되지 않는 거래일입니다."));
         risks.refreshIfAvailable(memberId, connectionId, context.tradingDate());
         var stock = context.stock();
         BigDecimal commissionRate = accountQueries.read(memberId, connectionId,
@@ -65,27 +65,8 @@ public class AutoBuyOrderPreparationService {
         );
     }
 
-    private RegularSession regularSession(LocalDate date) {
-        var day = market.marketCalendar(date).today();
-        if (!date.equals(day.date())) {
-            throw marketUnavailable();
-        }
-        if (day.integrated() == null || day.integrated().regularMarket() == null) {
-            throw conflict("정규장이 운영되지 않는 거래일입니다.");
-        }
-
-        var session = day.integrated().regularMarket();
-        if (session.startTime() == null || session.endTime() == null
-                || !session.startTime().isBefore(session.endTime())
-                || !date.equals(session.startTime().atZoneSameInstant(SEOUL).toLocalDate())
-                || !date.equals(session.endTime().atZoneSameInstant(SEOUL).toLocalDate())) {
-            throw marketUnavailable();
-        }
-        return session;
-    }
-
     private Long savePreparedOrder(
-            Long memberId, Long connectionId, BuyOrderContext context, RegularSession session, BigDecimal commissionRate
+            Long memberId, Long connectionId, BuyOrderContext context, RegularMarketSession session, BigDecimal commissionRate
     ) {
         // Serialize the reservation with automation enable and stop for the same member.
         var user = users.findByMemberId(memberId)
@@ -111,12 +92,12 @@ public class AutoBuyOrderPreparationService {
         }
 
         var now = clock.instant();
-        if (now.isBefore(session.startTime().toInstant()) || !now.isBefore(session.endTime().toInstant())) {
+        if (!session.isOpenAt(now)) {
             throw conflict("정규장 거래 시간에만 자동매수 주문을 준비할 수 있습니다.");
         }
 
         var quoteTime = context.quote().timestamp();
-        if (quoteTime == null || quoteTime.isBefore(session.startTime().toInstant())
+        if (quoteTime == null || quoteTime.isBefore(session.startsAt())
                 || quoteTime.isAfter(now) || !now.isBefore(quoteTime.plus(MAX_QUOTE_AGE))) {
             throw conflict("정규장의 최신 시세를 확인할 수 없습니다.");
         }
@@ -133,7 +114,7 @@ public class AutoBuyOrderPreparationService {
         }
 
         LocalDateTime expiresAt = Collections.min(List.of(
-                LocalDateTime.ofInstant(session.endTime().toInstant(), SEOUL),
+                LocalDateTime.ofInstant(session.endsAt(), SEOUL),
                 LocalDateTime.ofInstant(quoteTime.plus(MAX_QUOTE_AGE), SEOUL),
                 checkedRisk.validUntil()
         ));
@@ -152,10 +133,6 @@ public class AutoBuyOrderPreparationService {
         var order = Order.createAutoBuy(date, context.stock(), clientOrderKey, quantity, limitPrice,
                 decision, user, connection, settings, limitPrice, expiresAt);
         return orders.saveAndFlush(order).getOrderId();
-    }
-
-    private ResponseStatusException marketUnavailable() {
-        return new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "정규장 운영 시간을 확인할 수 없습니다.");
     }
 
     private ResponseStatusException conflict(String message) {
