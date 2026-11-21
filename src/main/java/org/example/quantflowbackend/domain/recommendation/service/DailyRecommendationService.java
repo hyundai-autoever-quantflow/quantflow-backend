@@ -32,24 +32,12 @@ public class DailyRecommendationService {
             return;
         }
 
-        var calendar = rankingService.marketCalendar(today);
-        if (!today.equals(calendar.today().date())) {
-            throw calendarUnavailable();
-        }
-        if (calendar.today().integrated() == null) {
+        var window = resolveWindow(cutoff).orElse(null);
+        if (window == null) {
             return;
         }
-
-        var previous = calendar.previousBusinessDay();
-        if (!previous.date().isBefore(today) || previous.integrated() == null
-                || previous.integrated().regularMarket() == null) {
-            throw calendarUnavailable();
-        }
-
-        LocalDate rankingDate = previous.date();
-        var request = new SearchedNewsAnalysisRequest(
-                query, previous.integrated().regularMarket().endTime(), cutoff
-        );
+        LocalDate rankingDate = window.rankingDate();
+        var request = new SearchedNewsAnalysisRequest(query, window.from(), window.to());
         var draft = newsAnalysisService.generateRecommendation(rankingDate, request);
         var pick = draft.recommendation();
 
@@ -85,6 +73,33 @@ public class DailyRecommendationService {
                 .optional()
                 .map(value -> json.readValue(value, DailyRecommendation.class));
     }
+
+    Optional<RecommendationWindow> todayWindow() {
+        return resolveWindow(OffsetDateTime.now(SEOUL));
+    }
+
+    private Optional<RecommendationWindow> resolveWindow(OffsetDateTime cutoff) {
+        var today = cutoff.toLocalDate();
+        var calendar = rankingService.marketCalendar(today);
+        if (!today.equals(calendar.today().date())) {
+            throw calendarUnavailable();
+        }
+        if (calendar.today().integrated() == null) {
+            return Optional.empty();
+        }
+
+        var previous = calendar.previousBusinessDay();
+        if (!previous.date().isBefore(today) || previous.integrated() == null
+                || previous.integrated().regularMarket() == null) {
+            throw calendarUnavailable();
+        }
+        return Optional.of(new RecommendationWindow(
+                today, previous.date(), previous.integrated().regularMarket().endTime(), cutoff
+        ));
+    }
+
+    record RecommendationWindow(LocalDate tradingDate, LocalDate rankingDate, OffsetDateTime from,
+                                OffsetDateTime to) {}
 
     private ResponseStatusException calendarUnavailable() {
         return new ResponseStatusException(

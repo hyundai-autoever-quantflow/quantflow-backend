@@ -10,6 +10,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.example.quantflowbackend.domain.recommendation.dto.*;
+import org.example.quantflowbackend.domain.recommendation.service.CategoryRecommendationService;
+import org.example.quantflowbackend.domain.recommendation.service.CategoryRecommendationService.CategoryRecommendation;
 import org.example.quantflowbackend.domain.recommendation.service.DailyRecommendationService;
 import org.example.quantflowbackend.domain.recommendation.service.NewsAnalysisService;
 import org.example.quantflowbackend.domain.recommendation.service.SearchedNewsAnalysisService;
@@ -35,6 +37,7 @@ public class NewsAnalysisController {
     private final NewsAnalysisService newsAnalysisService;
     private final SearchedNewsAnalysisService searchedNewsAnalysisService;
     private final DailyRecommendationService dailyRecommendationService;
+    private final CategoryRecommendationService categoryRecommendations;
 
     @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "뉴스 요약", description = """
@@ -111,6 +114,23 @@ public class NewsAnalysisController {
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
                 .body(searchedNewsAnalysisService.recommend(memberId, rankingDate, request));
+    }
+
+    @PostMapping("/recommendation/category")
+    @Operation(summary = "관심 카테고리 종목 추천",
+            description = "선택한 카테고리의 코스피·코스닥 종목에서 추천합니다. 카테고리를 생략하면 오늘의 공통 추천을 반환합니다.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "카테고리 추천, 공통 추천 또는 추천 보류"),
+            @ApiResponse(responseCode = "400", description = "지원하지 않는 카테고리 코드", content = @Content),
+            @ApiResponse(responseCode = "404", description = "휴장일 또는 저장된 공통 추천 없음", content = @Content),
+            @ApiResponse(responseCode = "503", description = "섹터 또는 랭킹 데이터 사용 불가", content = @Content)
+    })
+    public ResponseEntity<CategoryRecommendation> recommendCategory(
+            @Parameter(description = "카테고리 목록 API에서 받은 코드", example = "100")
+            @RequestParam(name = "categoryCode", required = false) String categoryCode
+    ) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(categoryRecommendations.recommend(categoryCode));
     }
 
     @GetMapping("/recommendation/today")
