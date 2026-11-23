@@ -52,6 +52,8 @@ def main():
             "RUN_TOSS_INTEGRATION_TESTS": "true",
             "OPENAI_API_KEY": "sk-isolated-test-not-real",
             "OPENAI_MODEL": "gpt-6-astra",
+            "NAVER_CLIENT_ID": "isolated-test-naver-id",
+            "NAVER_CLIENT_SECRET": "isolated-test-naver-secret",
         })
         wrapper = "gradlew.bat" if os.name == "nt" else "./gradlew"
         return subprocess.call([wrapper, "test", "--rerun-tasks", *sys.argv[1:]], cwd=repo, env=env)
