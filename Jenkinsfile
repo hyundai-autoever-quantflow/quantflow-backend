@@ -4,6 +4,9 @@ pipeline {
     options {
         disableConcurrentBuilds()
         skipDefaultCheckout()
+        triggers {
+            pollSCM('H/5 * * * *')
+        }
     }
 
     environment {
