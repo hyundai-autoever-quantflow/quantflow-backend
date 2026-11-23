@@ -1,5 +1,5 @@
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
 metadata:
   name: {{ include "quantflow-backend.fullname" . }}
   labels:
@@ -22,6 +22,11 @@ spec:
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+  strategy:
+    blueGreen:
+      activeService: { { include "quantflow-backend.fullname" . } }
+      previewService: { { printf "%s-preview" (include "quantflow-backend.fullname" .) } }
+      autoPromotionEnabled: false
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
