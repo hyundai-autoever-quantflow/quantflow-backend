@@ -1,0 +1,18 @@
+replicaCount: 1
+
+image:
+  repository: 504034151385.dkr.ecr.ap-northeast-2.amazonaws.com/quantflow-backend
+  tag: "3-c5e200019203"
+
+service:
+  type: ClusterIP
+  port: 8080
+
+livenessProbe: null
+
+readinessProbe:
+  httpGet:
+    path: /actuator/health
+    port: http
+
+existingSecret: quantflow-backend-secrets
