@@ -8,6 +8,11 @@ spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
+  strategy:
+    blueGreen:
+      activeService: {{ include "quantflow-backend.fullname" . }}
+      previewService: {{ printf "%s-preview" (include "quantflow-backend.fullname" .) }}
+      autoPromotionEnabled: false
   selector:
     matchLabels:
       {{- include "quantflow-backend.selectorLabels" . | nindent 6 }}
@@ -22,11 +27,6 @@ spec:
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-  strategy:
-    blueGreen:
-      activeService: { { include "quantflow-backend.fullname" . } }
-      previewService: { { printf "%s-preview" (include "quantflow-backend.fullname" .) } }
-      autoPromotionEnabled: false
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
