@@ -1,0 +1,10 @@
+spec:
+  source:
+    targetRevision: deploy/dev
+    helm:
+      valueFiles:
+        - values-dev.yaml
+        - image-dev.yaml
+  syncPolicy:
+    automated:
+      enabled: true
