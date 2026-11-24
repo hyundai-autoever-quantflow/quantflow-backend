@@ -5,9 +5,10 @@ pipeline {
         disableConcurrentBuilds()
         skipDefaultCheckout()
     }
+
     triggers {
-                pollSCM('H/5 * * * *')
-            }
+        pollSCM('H/5 * * * *')
+    }
 
     environment {
         AWS_REGION = 'ap-northeast-2'
@@ -37,11 +38,14 @@ pipeline {
 
         stage('Build and Push Image') {
             steps {
-                    sh '''#!/bin/bash
+                script {
+                    def commit = sh(script: 'git rev-parse --short=12 HEAD', returnStdout: true).trim()
+                    env.IMAGE_TAG = "${env.BUILD_NUMBER}-${commit}"
+                }
+                sh '''#!/bin/bash
             set -euo pipefail
 
-            commit=$(git rev-parse --short=12 HEAD)
-            image="${ECR_REGISTRY}/${ECR_REPOSITORY}:${BUILD_NUMBER}-${commit}"
+            image="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
 
             temp_dir=$(mktemp -d)
             trap 'rm -rf -- "$temp_dir"' EXIT
@@ -57,7 +61,15 @@ pipeline {
 
             docker push "$image"
             '''
+            }
+        }
+
+        stage('Update Dev Image Tag') {
+            steps {
+                withCredentials([gitUsernamePassword(credentialsId: 'quantflow-gitops-write', gitToolName: 'Default')]) {
+                    sh 'bash scripts/update-dev-image-tag.sh "$IMAGE_TAG"'
                 }
+            }
         }
     }
 }
